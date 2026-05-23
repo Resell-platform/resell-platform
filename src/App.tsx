@@ -751,7 +751,9 @@ function NotificationsView({
   activeUserId: string;
   markAllRead: () => void;
 }) {
-  const notifications = state.notifications.filter((notification) => notification.userId === activeUserId);
+  const unreadNotifications = state.notifications.filter(
+    (notification) => notification.userId === activeUserId && !notification.readAt
+  );
 
   return (
     <section className="workspace">
@@ -761,21 +763,21 @@ function NotificationsView({
             <p className="eyebrow">Notifications</p>
             <h1>Payment and message alerts</h1>
           </div>
-          <button className="secondary" onClick={markAllRead}>
+          <button className="secondary" disabled={unreadNotifications.length === 0} onClick={markAllRead}>
             <CheckCircle2 size={16} />
             Mark read
           </button>
         </div>
         <div className="notifications">
-          {notifications.map((notification) => (
-            <article className={notification.readAt ? "notice" : "notice unread"} key={notification.id}>
+          {unreadNotifications.map((notification) => (
+            <article className="notice unread" key={notification.id}>
               <span className={`badge ${notification.type}`}>{notification.type.replace("_", " ")}</span>
               <h2>{notification.title}</h2>
               <p>{notification.body}</p>
               <time>{new Date(notification.createdAt).toLocaleString()}</time>
             </article>
           ))}
-          {notifications.length === 0 && <p className="muted">No notifications for this demo user.</p>}
+          {unreadNotifications.length === 0 && <p className="muted">No unread notifications.</p>}
         </div>
       </div>
     </section>

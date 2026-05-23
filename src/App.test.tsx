@@ -86,6 +86,19 @@ describe("App user flows", () => {
     expect(screen.queryByText(/i can pay today/i)).not.toBeInTheDocument();
   });
 
+  it("clears unread notifications when marking them read", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /alerts/i }));
+    expect(screen.getByRole("heading", { name: /payment overdue/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /mark read/i }));
+
+    expect(screen.queryByRole("heading", { name: /payment overdue/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/no unread notifications/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /mark read/i })).toBeDisabled();
+  });
+
   it("keeps the primary mobile navigation visible in the rendered shell", () => {
     render(<App />);
 
