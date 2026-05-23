@@ -1,4 +1,5 @@
 name = "resell-platform"
+account_id = "f5333e4ad914f5981c38ce95f18954b6"
 compatibility_date = "2026-05-23"
 pages_build_output_dir = "dist"
 
@@ -11,4 +12,3 @@ migrations_dir = "migrations"
 [[r2_buckets]]
 binding = "LISTING_IMAGES"
 bucket_name = "resell-platform-images"
-
