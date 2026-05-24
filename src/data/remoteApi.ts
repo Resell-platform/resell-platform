@@ -1,8 +1,24 @@
-import type { AppState, ListingDraft, ReservationStatus } from "./types";
+import type { AppState, ListingDraft, ReservationStatus, User } from "./types";
+
+export type RemoteSession = {
+  user: User | null;
+};
+
+export type RequestCodeResponse = {
+  email: string;
+  delivery: "development_response" | "email";
+  verificationCode?: string;
+};
+
+export type AuthStateResponse = {
+  user: User;
+  state: AppState;
+};
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
+    credentials: "include",
     headers: {
       "content-type": "application/json",
       ...init?.headers
@@ -18,49 +34,81 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function fetchRemoteState(activeUserId: string): Promise<AppState> {
-  return apiRequest<AppState>(`/api/state?activeUserId=${encodeURIComponent(activeUserId)}`);
+  return apiRequest<AppState>("/api/state");
 }
 
-export async function createRemoteListing(sellerId: string, draft: ListingDraft): Promise<AppState> {
+export async function fetchRemoteSession(): Promise<RemoteSession> {
+  return apiRequest<RemoteSession>("/api/me");
+}
+
+export async function requestRemoteEmailCode(email: string, displayName?: string): Promise<RequestCodeResponse> {
+  return apiRequest<RequestCodeResponse>("/api/auth/request-code", {
+    method: "POST",
+    body: JSON.stringify({ email, displayName })
+  });
+}
+
+export async function verifyRemoteEmailCode(
+  email: string,
+  code: string,
+  displayName?: string
+): Promise<AuthStateResponse> {
+  return apiRequest<AuthStateResponse>("/api/auth/verify-code", {
+    method: "POST",
+    body: JSON.stringify({ email, code, displayName })
+  });
+}
+
+export async function logoutRemoteSession(): Promise<{ ok: true }> {
+  return apiRequest<{ ok: true }>("/api/auth/logout", {
+    method: "POST",
+    body: JSON.stringify({})
+  });
+}
+
+export async function updateRemoteProfile(draft: {
+  displayName: string;
+  bio?: string;
+  pickupArea?: string;
+  phoneE164?: string;
+}): Promise<AuthStateResponse> {
+  return apiRequest<AuthStateResponse>("/api/me", {
+    method: "PATCH",
+    body: JSON.stringify(draft)
+  });
+}
+
+export async function createRemoteListing(draft: ListingDraft): Promise<AppState> {
   return apiRequest<AppState>("/api/listings", {
     method: "POST",
-    body: JSON.stringify({ sellerId, draft })
+    body: JSON.stringify({ draft })
   });
 }
 
-export async function reserveRemoteListing(listingId: string, buyerId: string): Promise<AppState> {
+export async function reserveRemoteListing(listingId: string): Promise<AppState> {
   return apiRequest<AppState>("/api/reservations", {
     method: "POST",
-    body: JSON.stringify({ listingId, buyerId })
+    body: JSON.stringify({ listingId })
   });
 }
 
-export async function sendRemoteMessage(
-  reservationId: string,
-  senderId: string,
-  body: string
-): Promise<AppState> {
+export async function sendRemoteMessage(reservationId: string, body: string): Promise<AppState> {
   return apiRequest<AppState>("/api/messages", {
     method: "POST",
-    body: JSON.stringify({ reservationId, senderId, body })
+    body: JSON.stringify({ reservationId, body })
   });
 }
 
-export async function updateRemoteReservationStatus(
-  reservationId: string,
-  actorId: string,
-  status: ReservationStatus
-): Promise<AppState> {
+export async function updateRemoteReservationStatus(reservationId: string, status: ReservationStatus): Promise<AppState> {
   return apiRequest<AppState>(`/api/reservations/${encodeURIComponent(reservationId)}/status`, {
     method: "POST",
-    body: JSON.stringify({ actorId, status })
+    body: JSON.stringify({ status })
   });
 }
 
-export async function markRemoteNotificationsRead(userId: string): Promise<AppState> {
+export async function markRemoteNotificationsRead(): Promise<AppState> {
   return apiRequest<AppState>("/api/notifications/read", {
     method: "POST",
-    body: JSON.stringify({ userId })
+    body: JSON.stringify({})
   });
 }
-

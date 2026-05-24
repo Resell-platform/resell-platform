@@ -68,6 +68,57 @@ button:disabled {
   font-weight: 900;
 }
 
+.account-panel {
+  display: grid;
+  gap: 10px;
+  color: #172026;
+  background: #f8faf7;
+  border: 1px solid #3a4b53;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.account-panel p {
+  margin-bottom: 0;
+  color: #65727c;
+  font-size: 0.86rem;
+}
+
+.account-heading,
+.trust-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trust-badge {
+  width: fit-content;
+  border-radius: 999px;
+  background: #dff4df;
+  color: #215b22;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+}
+
+.muted-badge {
+  background: #e8ede8;
+  color: #65727c;
+}
+
+.account-message {
+  border-radius: 8px;
+  background: #fff1c9;
+  color: #765600 !important;
+  padding: 8px;
+  font-weight: 800;
+}
+
+.account-logout {
+  margin-top: 0;
+}
+
 .user-switcher {
   display: grid;
   gap: 8px;
@@ -577,7 +628,9 @@ label {
 
   .brand,
   .user-switcher,
-  .reset {
+  .reset,
+  .sidebar > .account-panel,
+  .sidebar > .data-source {
     display: none;
   }
 

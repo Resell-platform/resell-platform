@@ -17,12 +17,19 @@ const TERMINAL_RESERVATION_STATUSES = new Set<ReservationStatus>(["paid", "sold"
 export type Env = {
   DB: D1Database;
   LISTING_IMAGES?: R2Bucket;
+  RESEND_API_KEY?: string;
+  AUTH_EMAIL_FROM?: string;
 };
 
 type UserRow = {
   id: string;
   name: string;
   role: User["role"];
+  email_verified_at?: string | null;
+  phone_verified_at?: string | null;
+  pickup_area?: string | null;
+  bio?: string | null;
+  avatar_url?: string | null;
 };
 
 type ListingRow = {
@@ -83,17 +90,52 @@ export function createId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
-export async function readState(db: D1Database, activeUserId = "seller-1"): Promise<AppState> {
+type StateUser = {
+  id: string;
+};
+
+export async function readState(db: D1Database, currentUser?: StateUser): Promise<AppState> {
   await markOverdueReservations(db);
 
-  const [users, listings, images, reservations, messages, notifications] = await Promise.all([
-    db.prepare("SELECT id, name, role FROM users ORDER BY created_at, name").all<UserRow>(),
+  const [users, listings, images] = await Promise.all([
+    db
+      .prepare(
+        `SELECT id, name, role, email_verified_at, phone_verified_at, pickup_area, bio, avatar_url
+         FROM users
+         ORDER BY created_at, name`
+      )
+      .all<UserRow>(),
     db.prepare("SELECT * FROM listings ORDER BY created_at DESC").all<ListingRow>(),
-    db.prepare("SELECT * FROM listing_images ORDER BY created_at").all<ListingImageRow>(),
-    db.prepare("SELECT * FROM reservations ORDER BY created_at DESC").all<ReservationRow>(),
-    db.prepare("SELECT * FROM messages ORDER BY created_at").all<MessageRow>(),
-    db.prepare("SELECT * FROM notifications ORDER BY created_at DESC").all<NotificationRow>()
+    db.prepare("SELECT * FROM listing_images ORDER BY created_at").all<ListingImageRow>()
   ]);
+  const reservations = currentUser
+    ? await db
+        .prepare(
+          `SELECT * FROM reservations
+           WHERE buyer_id = ? OR seller_id = ?
+           ORDER BY created_at DESC`
+        )
+        .bind(currentUser.id, currentUser.id)
+        .all<ReservationRow>()
+    : { results: [] as ReservationRow[] };
+  const reservationIds = reservations.results.map((row) => row.id);
+  const messages =
+    reservationIds.length > 0
+      ? await db
+          .prepare(
+            `SELECT * FROM messages
+             WHERE reservation_id IN (${reservationIds.map(() => "?").join(",")})
+             ORDER BY created_at`
+          )
+          .bind(...reservationIds)
+          .all<MessageRow>()
+      : { results: [] as MessageRow[] };
+  const notifications = currentUser
+    ? await db
+        .prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC")
+        .bind(currentUser.id)
+        .all<NotificationRow>()
+    : { results: [] as NotificationRow[] };
 
   const imagesByListing = new Map<string, ListingImage[]>();
   for (const row of images.results) {
@@ -112,9 +154,14 @@ export async function readState(db: D1Database, activeUserId = "seller-1"): Prom
     users: users.results.map((row) => ({
       id: row.id,
       name: row.name,
-      role: row.role
+      role: row.role,
+      emailVerifiedAt: row.email_verified_at ?? undefined,
+      phoneVerifiedAt: row.phone_verified_at ?? undefined,
+      pickupArea: row.pickup_area ?? undefined,
+      bio: row.bio ?? undefined,
+      avatarUrl: row.avatar_url ?? undefined
     })),
-    activeUserId,
+    activeUserId: currentUser?.id ?? "",
     listings: listings.results.map((row) => ({
       id: row.id,
       sellerId: row.seller_id,
@@ -163,8 +210,8 @@ export async function readState(db: D1Database, activeUserId = "seller-1"): Prom
 export async function createListingInDb(env: Env, sellerId: string, draft: ListingDraft) {
   const db = env.DB;
   const seller = await db.prepare("SELECT id, role FROM users WHERE id = ?").bind(sellerId).first<UserRow>();
-  if (!seller || seller.role !== "seller") {
-    throw new ApiError("Only sellers can create listings.", 403);
+  if (!seller) {
+    throw new ApiError("Log in to create listings.", 401);
   }
   if (!draft.title.trim() || !draft.description.trim() || !draft.location.trim() || draft.price <= 0) {
     throw new ApiError("Listing title, description, location, and price are required.");

@@ -4,6 +4,34 @@ export type User = {
   id: string;
   name: string;
   role: UserRole;
+  emailVerifiedAt?: string;
+  phoneVerifiedAt?: string;
+  pickupArea?: string;
+  bio?: string;
+  avatarUrl?: string;
+};
+
+export type AccountStatus = "active" | "disabled";
+
+export type UserAccount = {
+  id: string;
+  userId: string;
+  email: string;
+  passwordHash: string;
+  status: AccountStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastLoginAt?: string;
+};
+
+export type UserProfile = {
+  userId: string;
+  displayName: string;
+  bio: string;
+  location: string;
+  avatarDataUrl?: string;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type ListingStatus = "available" | "reserved" | "sold" | "paused";
@@ -82,6 +110,9 @@ export type Notification = {
 export type AppState = {
   users: User[];
   activeUserId: string;
+  activeAccountId?: string;
+  accounts?: UserAccount[];
+  profiles?: UserProfile[];
   listings: Listing[];
   reservations: Reservation[];
   messages: Message[];
@@ -98,3 +129,48 @@ export type ListingDraft = {
   images: ListingImage[];
 };
 
+export type RegistrationDraft = {
+  name: string;
+  email: string;
+  password: string;
+  role: UserRole;
+  bio?: string;
+  location?: string;
+  avatarDataUrl?: string;
+};
+
+export type LoginCredentials = {
+  email: string;
+  password: string;
+};
+
+export type ProfileDraft = {
+  displayName: string;
+  bio?: string;
+  location?: string;
+  avatarDataUrl?: string;
+};
+
+export type AccountActionError =
+  | "invalid_email"
+  | "email_taken"
+  | "weak_password"
+  | "name_required"
+  | "invalid_credentials"
+  | "account_disabled"
+  | "user_not_found";
+
+export type AccountActionResult =
+  | {
+      ok: true;
+      state: AppState;
+      user: User;
+      profile: UserProfile;
+      account?: UserAccount;
+    }
+  | {
+      ok: false;
+      state: AppState;
+      error: AccountActionError;
+      message: string;
+    };

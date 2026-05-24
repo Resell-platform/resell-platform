@@ -11,6 +11,33 @@ export const seedState: AppState = {
     { id: "buyer-2", name: "Mina Patel", role: "buyer" }
   ],
   activeUserId: "seller-1",
+  profiles: [
+    {
+      userId: "seller-1",
+      displayName: "Avery Chen",
+      bio: "Curates furniture, electronics, and home finds around New York.",
+      location: "Brooklyn, NY",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    },
+    {
+      userId: "buyer-1",
+      displayName: "Jordan Lee",
+      bio: "",
+      location: "Queens, NY",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    },
+    {
+      userId: "buyer-2",
+      displayName: "Mina Patel",
+      bio: "",
+      location: "New York, NY",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString()
+    }
+  ],
+  accounts: [],
   listings: [
     {
       id: "listing-1",
@@ -92,4 +119,3 @@ export const seedState: AppState = {
   ],
   notifications: []
 };
-

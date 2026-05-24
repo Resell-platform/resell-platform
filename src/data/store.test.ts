@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   computeOverdueNotifications,
   createListing,
+  getAccountByEmail,
+  getUserProfile,
+  loginAccount,
+  registerAccount,
   reserveListing,
   sendMessage,
+  updateUserProfile,
   updateReservationStatus
 } from "./store";
 import { seedState } from "./seed";
@@ -28,6 +33,102 @@ const draft: ListingDraft = {
 };
 
 describe("store state transitions", () => {
+  it("registers a local account, profile, and active user", () => {
+    const result = registerAccount(seedState, {
+      name: "Taylor Reed",
+      email: " Taylor@example.COM ",
+      password: "password123",
+      role: "buyer",
+      bio: "Looking for used audio gear.",
+      location: "Manhattan"
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const account = result.account;
+    expect(account).toBeDefined();
+    if (!account) return;
+
+    expect(account.email).toBe("taylor@example.com");
+    expect(account.passwordHash).not.toBe("password123");
+    expect(result.state.activeUserId).toBe(result.user.id);
+    expect(result.state.activeAccountId).toBe(account.id);
+    expect(result.profile.displayName).toBe("Taylor Reed");
+    expect(result.profile.location).toBe("Manhattan");
+  });
+
+  it("prevents duplicate registration by normalized email", () => {
+    const first = registerAccount(seedState, {
+      name: "Taylor Reed",
+      email: "taylor@example.com",
+      password: "password123",
+      role: "buyer"
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const second = registerAccount(first.state, {
+      name: "Another Taylor",
+      email: " TAYLOR@example.com ",
+      password: "password123",
+      role: "seller"
+    });
+
+    expect(second.ok).toBe(false);
+    if (second.ok) return;
+    expect(second.error).toBe("email_taken");
+    expect(second.state.users).toHaveLength(first.state.users.length);
+  });
+
+  it("logs in an active account and updates the active session fields", () => {
+    const registered = registerAccount(seedState, {
+      name: "Taylor Reed",
+      email: "taylor@example.com",
+      password: "password123",
+      role: "seller"
+    });
+    expect(registered.ok).toBe(true);
+    if (!registered.ok) return;
+    const account = registered.account;
+    expect(account).toBeDefined();
+    if (!account) return;
+
+    const loggedIn = loginAccount(
+      {
+        ...registered.state,
+        activeUserId: "buyer-1",
+        activeAccountId: undefined
+      },
+      { email: " TAYLOR@example.com ", password: "password123" }
+    );
+
+    expect(loggedIn.ok).toBe(true);
+    if (!loggedIn.ok) return;
+    expect(loggedIn.state.activeUserId).toBe(registered.user.id);
+    expect(loggedIn.state.activeAccountId).toBe(account.id);
+    expect(getAccountByEmail(loggedIn.state, "taylor@example.com")?.lastLoginAt).toBeDefined();
+  });
+
+  it("updates a profile and keeps the user display name in sync", () => {
+    const next = updateUserProfile(
+      {
+        ...seedState,
+        profiles: []
+      },
+      "buyer-1",
+      {
+        displayName: "Jordan Rivera",
+        bio: "Pickup preferred.",
+        location: "Queens"
+      }
+    );
+
+    expect(next.ok).toBe(true);
+    if (!next.ok) return;
+    expect(next.state.users.find((user) => user.id === "buyer-1")?.name).toBe("Jordan Rivera");
+    expect(getUserProfile(next.state, "buyer-1")?.bio).toBe("Pickup preferred.");
+  });
+
   it("creates a listing with image metadata and available status", () => {
     const next = createListing(seedState, "seller-1", draft);
     const listing = next.listings[0];
