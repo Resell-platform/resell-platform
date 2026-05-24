@@ -6,6 +6,7 @@ import type {
   AppState,
   Listing,
   ListingDraft,
+  ListingStatus,
   LoginCredentials,
   Message,
   Notification,
@@ -18,6 +19,12 @@ const STORAGE_KEY = "resell-platform:v1";
 const STORAGE_VERSION = 2;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_PASSWORD_LENGTH = 8;
+const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
+  "requested",
+  "awaiting_payment",
+  "payment_sent",
+  "overdue"
+];
 
 const stateResource = createLocalStorageResource<AppState>({
   key: STORAGE_KEY,
@@ -244,6 +251,33 @@ export function createListing(state: AppState, sellerId: string, draft: ListingD
   return {
     ...state,
     listings: [listing, ...state.listings]
+  };
+}
+
+export function updateListingStatus(
+  state: AppState,
+  listingId: string,
+  sellerId: string,
+  status: Exclude<ListingStatus, "reserved">
+): AppState {
+  const listing = state.listings.find((item) => item.id === listingId);
+  if (!listing || listing.sellerId !== sellerId) return state;
+  if (listing.status === "sold" || listing.status === "reserved") return state;
+
+  const hasActiveReservation = state.reservations.some(
+    (reservation) =>
+      reservation.listingId === listingId && ACTIVE_RESERVATION_STATUSES.includes(reservation.status)
+  );
+  if (hasActiveReservation) {
+    return state;
+  }
+
+  const now = new Date().toISOString();
+  return {
+    ...state,
+    listings: state.listings.map((item) =>
+      item.id === listingId ? { ...item, status, updatedAt: now } : item
+    )
   };
 }
 

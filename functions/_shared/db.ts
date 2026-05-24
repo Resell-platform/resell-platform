@@ -3,6 +3,7 @@ import type {
   Listing,
   ListingDraft,
   ListingImage,
+  ListingStatus,
   Message,
   Notification,
   Reservation,
@@ -13,6 +14,7 @@ import { ApiError } from "./http";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TERMINAL_RESERVATION_STATUSES = new Set<ReservationStatus>(["paid", "sold", "cancelled"]);
+const OWNER_LISTING_STATUSES = new Set<ListingStatus>(["available", "paused", "sold"]);
 
 export type Env = {
   DB: D1Database;
@@ -303,6 +305,51 @@ export async function reserveListingInDb(db: D1Database, listingId: string, buye
         now.toISOString()
       )
   ]);
+}
+
+export async function updateListingStatusInDb(
+  db: D1Database,
+  listingId: string,
+  sellerId: string,
+  status: ListingStatus
+) {
+  if (!OWNER_LISTING_STATUSES.has(status) || status === "reserved") {
+    throw new ApiError("Listing status must be available, paused, or sold.");
+  }
+
+  const listing = await db
+    .prepare("SELECT * FROM listings WHERE id = ? AND seller_id = ?")
+    .bind(listingId, sellerId)
+    .first<ListingRow>();
+  if (!listing) throw new ApiError("Listing not found for this seller.", 404);
+  if (listing.status === "sold") {
+    throw new ApiError("Sold listings cannot be changed.", 409);
+  }
+  if (listing.status === "reserved") {
+    throw new ApiError("Resolve the active reservation before changing this listing.", 409);
+  }
+
+  const now = new Date().toISOString();
+  const result = await db
+    .prepare(
+      `UPDATE listings
+       SET status = ?, updated_at = ?
+       WHERE id = ?
+         AND seller_id = ?
+         AND status IN ('available', 'paused')
+         AND NOT EXISTS (
+           SELECT 1
+           FROM reservations
+           WHERE listing_id = ?
+             AND status IN ('requested', 'awaiting_payment', 'payment_sent', 'overdue')
+         )`
+    )
+    .bind(status, now, listingId, sellerId, listingId)
+    .run();
+
+  if (!result.meta.changes) {
+    throw new ApiError("Resolve the active reservation before changing this listing availability.", 409);
+  }
 }
 
 export async function sendMessageInDb(db: D1Database, reservationId: string, senderId: string, body: string) {

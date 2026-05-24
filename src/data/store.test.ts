@@ -8,6 +8,7 @@ import {
   registerAccount,
   reserveListing,
   sendMessage,
+  updateListingStatus,
   updateUserProfile,
   updateReservationStatus
 } from "./store";
@@ -146,6 +147,45 @@ describe("store state transitions", () => {
     expect(first.listings.find((listing) => listing.id === "listing-1")?.status).toBe("reserved");
     expect(first.reservations).toHaveLength(seedState.reservations.length + 1);
     expect(second.reservations).toHaveLength(first.reservations.length);
+  });
+
+  it("lets a listing owner pause and resume an available listing", () => {
+    const paused = updateListingStatus(seedState, "listing-1", "seller-1", "paused");
+    const available = updateListingStatus(paused, "listing-1", "seller-1", "available");
+
+    expect(paused.listings.find((listing) => listing.id === "listing-1")?.status).toBe("paused");
+    expect(available.listings.find((listing) => listing.id === "listing-1")?.status).toBe("available");
+  });
+
+  it("prevents non-owners from managing listing status", () => {
+    const next = updateListingStatus(seedState, "listing-1", "buyer-1", "paused");
+
+    expect(next).toBe(seedState);
+  });
+
+  it("prevents making a listing available while it has an active reservation", () => {
+    const next = updateListingStatus(seedState, "listing-2", "seller-1", "available");
+
+    expect(next).toBe(seedState);
+    expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("reserved");
+  });
+
+  it("treats reserved listings as reservation-managed", () => {
+    const next = updateListingStatus(seedState, "listing-2", "seller-1", "sold");
+
+    expect(next).toBe(seedState);
+    expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("reserved");
+    expect(next.reservations.find((reservation) => reservation.listingId === "listing-2")?.status).toBe(
+      "awaiting_payment"
+    );
+  });
+
+  it("treats sold listings as terminal", () => {
+    const sold = updateListingStatus(seedState, "listing-1", "seller-1", "sold");
+    const available = updateListingStatus(sold, "listing-1", "seller-1", "available");
+
+    expect(sold.listings.find((listing) => listing.id === "listing-1")?.status).toBe("sold");
+    expect(available).toBe(sold);
   });
 
   it("does not let a seller reserve their own listing", () => {

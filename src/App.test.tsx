@@ -116,6 +116,28 @@ describe("App user flows", () => {
     }
   });
 
+  it("lets the local seller manage listing status from My listings", () => {
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    const deskStatus = screen.getByLabelText(/status for walnut writing desk/i);
+
+    expect(deskStatus).toHaveValue("available");
+    fireEvent.change(deskStatus, { target: { value: "paused" } });
+    expect(screen.getByLabelText(/status for walnut writing desk/i)).toHaveValue("paused");
+
+    const cameraStatus = screen.getByLabelText(/status for mirrorless camera kit/i);
+    expect(cameraStatus).toHaveValue("reserved");
+    expect(cameraStatus).toBeDisabled();
+    expect(screen.getByText(/use picked or chat to mark paid or cancel/i)).toBeInTheDocument();
+
+    fireEvent.change(cameraStatus, { target: { value: "available" } });
+    expect(screen.getByLabelText(/status for mirrorless camera kit/i)).toHaveValue("reserved");
+
+    fireEvent.change(cameraStatus, { target: { value: "sold" } });
+    expect(screen.getByLabelText(/status for mirrorless camera kit/i)).toHaveValue("reserved");
+  });
+
   it("keeps browse public in Cloudflare mode when the visitor is logged out", async () => {
     mockCloudflareSession(null);
 

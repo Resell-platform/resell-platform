@@ -500,6 +500,25 @@ label {
   align-items: center;
 }
 
+.listing-management-row {
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.listing-management-row > div {
+  min-width: 0;
+  flex: 1 1 150px;
+}
+
+.status-control {
+  min-width: 140px;
+  flex: 0 0 150px;
+}
+
+.status-control select {
+  padding: 8px 10px;
+}
+
 .thread {
   width: 100%;
   text-align: left;

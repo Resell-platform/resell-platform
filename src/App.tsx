@@ -23,6 +23,7 @@ import {
   resetState,
   saveState,
   sendMessage,
+  updateListingStatus,
   updateReservationStatus
 } from "./data/store";
 import {
@@ -34,14 +35,21 @@ import {
   requestRemoteEmailCode,
   reserveRemoteListing,
   sendRemoteMessage,
+  updateRemoteListingStatus,
   updateRemoteProfile,
   updateRemoteReservationStatus,
   verifyRemoteEmailCode
 } from "./data/remoteApi";
-import type { AppState, Listing, ListingDraft, ListingImage, Reservation, User } from "./data/types";
+import type { AppState, Listing, ListingDraft, ListingImage, ListingStatus, Reservation, User } from "./data/types";
 
 type View = "browse" | "sell" | "orders" | "chat" | "notifications";
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
+  "requested",
+  "awaiting_payment",
+  "payment_sent",
+  "overdue"
+];
 
 const blankDraft: ListingDraft = {
   title: "",
@@ -235,6 +243,19 @@ export default function App() {
     return true;
   }
 
+  function handleUpdateListingStatus(listingId: string, status: Exclude<ListingStatus, "reserved">) {
+    if (dataSource === "cloudflare") {
+      if (!sessionUser) {
+        promptLogin("Log in with email to manage your listings.");
+        return;
+      }
+      runRemoteAction(() => updateRemoteListingStatus(listingId, status));
+      return;
+    }
+
+    update(updateListingStatus(state, listingId, activeUser?.id ?? "", status));
+  }
+
   return (
     <div className="app">
       <aside className="sidebar" aria-label="Primary navigation">
@@ -346,7 +367,13 @@ export default function App() {
           <LoginRequiredPanel view={view} />
         )}
         {view === "sell" && !(dataSource === "cloudflare" && !sessionUser) && (
-          <SellView activeUser={activeUser} onCreate={handleCreateListing} listings={state.listings} />
+          <SellView
+            activeUser={activeUser}
+            onCreate={handleCreateListing}
+            listings={state.listings}
+            reservations={state.reservations}
+            updateStatus={handleUpdateListingStatus}
+          />
         )}
         {view === "orders" && !(dataSource === "cloudflare" && !sessionUser) && (
           <OrdersView
@@ -729,11 +756,15 @@ function ListingGallery({ listing }: { listing: Listing }) {
 function SellView({
   activeUser,
   onCreate,
-  listings
+  listings,
+  reservations,
+  updateStatus
 }: {
   activeUser: User | null;
   onCreate: (draft: ListingDraft) => Promise<boolean> | boolean;
   listings: Listing[];
+  reservations: Reservation[];
+  updateStatus: (listingId: string, status: Exclude<ListingStatus, "reserved">) => void;
 }) {
   const [draft, setDraft] = useState<ListingDraft>(blankDraft);
   const [uploadError, setUploadError] = useState("");
@@ -866,15 +897,52 @@ function SellView({
       <aside className="panel compact-list">
         <p className="eyebrow">My listings</p>
         <h2>{activeUser?.name ?? "Account required"}</h2>
-        {sellerListings.map((listing) => (
-          <div className="row" key={listing.id}>
-            <img src={getPrimaryImage(listing)} alt="" />
-            <div>
-              <strong>{listing.title}</strong>
-              <span className={`badge ${listing.status}`}>{listing.status}</span>
+        {sellerListings.map((listing) => {
+          const activeReservation = reservations.find(
+            (reservation) =>
+              reservation.listingId === listing.id && ACTIVE_RESERVATION_STATUSES.includes(reservation.status)
+          );
+          const selectableStatus = listing.status === "reserved" ? "reserved" : listing.status;
+          const isTerminal = listing.status === "sold";
+
+          return (
+            <div className="row listing-management-row" key={listing.id}>
+              <img src={getPrimaryImage(listing)} alt="" />
+              <div>
+                <strong>{listing.title}</strong>
+                <p className="muted">${listing.price} · Updated {new Date(listing.updatedAt).toLocaleDateString()}</p>
+                <span className={`badge ${listing.status}`}>{listing.status}</span>
+                {activeReservation && (
+                  <p className="muted">Reserved. Use Picked or Chat to mark paid or cancel.</p>
+                )}
+              </div>
+              <label className="status-control">
+                <span>Status</span>
+                <select
+                  aria-label={`Status for ${listing.title}`}
+                  value={selectableStatus}
+                  disabled={Boolean(activeReservation) || isTerminal}
+                  onChange={(event) =>
+                    updateStatus(listing.id, event.target.value as Exclude<ListingStatus, "reserved">)
+                  }
+                >
+                  {listing.status === "reserved" && (
+                    <option value="reserved" disabled>
+                      Reserved
+                    </option>
+                  )}
+                  <option value="available">
+                    Available
+                  </option>
+                  <option value="paused">
+                    Paused
+                  </option>
+                  <option value="sold">Sold</option>
+                </select>
+              </label>
             </div>
-          </div>
-        ))}
+          );
+        })}
         {sellerListings.length === 0 && <p className="muted">Switch to the seller demo user to manage listings.</p>}
       </aside>
     </section>

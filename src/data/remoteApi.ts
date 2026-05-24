@@ -1,4 +1,4 @@
-import type { AppState, ListingDraft, ReservationStatus, User } from "./types";
+import type { AppState, ListingDraft, ListingStatus, ReservationStatus, User } from "./types";
 
 export type RemoteSession = {
   user: User | null;
@@ -89,6 +89,16 @@ export async function reserveRemoteListing(listingId: string): Promise<AppState>
   return apiRequest<AppState>("/api/reservations", {
     method: "POST",
     body: JSON.stringify({ listingId })
+  });
+}
+
+export async function updateRemoteListingStatus(
+  listingId: string,
+  status: Exclude<ListingStatus, "reserved">
+): Promise<AppState> {
+  return apiRequest<AppState>(`/api/listings/${encodeURIComponent(listingId)}/status`, {
+    method: "POST",
+    body: JSON.stringify({ status })
   });
 }
 
