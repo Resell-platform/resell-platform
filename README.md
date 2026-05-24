@@ -44,7 +44,7 @@ npm run build
 ## Current Limits
 
 - `npm run dev` still uses browser `localStorage`; use `npm run dev:cloudflare` to exercise D1.
-- Email-code delivery is currently a development shim: localhost can return the code, while production omits it and logs the code server-side until a transactional email provider is wired in.
+- Email-code delivery uses Resend in Cloudflare mode with a per-email cooldown and hourly limit. Localhost returns the development code in the API response for testing.
 - Seed demo images are stored as data URLs for portability. New Cloudflare listing uploads are written to R2 and D1 stores the served image path plus R2 key.
 - Overdue monitoring runs when `/api/state` is called. A production scheduled Worker should be added before relying on background notifications.
 - There is no moderation, payment provider, or production SMS provider yet. Phone verification is modeled as an optional trust badge field.
@@ -59,6 +59,7 @@ The repository is configured for Cloudflare Pages Functions, D1, and R2:
 - Pages Functions directory: `functions`
 - D1 binding: `DB`
 - R2 binding: `LISTING_IMAGES` after R2 is enabled on the Cloudflare account
+- Required auth secrets/env vars: `RESEND_API_KEY`, `AUTH_EMAIL_FROM`
 
 Create the Cloudflare resources:
 
@@ -79,6 +80,15 @@ Apply the remote migrations:
 ```bash
 npm run cf:d1:migrate:remote
 ```
+
+Configure Resend before deploying email login:
+
+```bash
+npx wrangler pages secret put RESEND_API_KEY --project-name resell-platform
+npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
+```
+
+`AUTH_EMAIL_FROM` must be a sender address allowed by the Resend account, for example `Resell <login@your-verified-domain.com>`.
 
 Deploy the Pages app:
 

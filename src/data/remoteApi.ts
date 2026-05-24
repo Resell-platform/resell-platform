@@ -78,43 +78,35 @@ export async function updateRemoteProfile(draft: {
   });
 }
 
-export async function createRemoteListing(sellerId: string, draft: ListingDraft): Promise<AppState> {
+export async function createRemoteListing(draft: ListingDraft): Promise<AppState> {
   return apiRequest<AppState>("/api/listings", {
     method: "POST",
     body: JSON.stringify({ draft })
   });
 }
 
-export async function reserveRemoteListing(listingId: string, buyerId: string): Promise<AppState> {
+export async function reserveRemoteListing(listingId: string): Promise<AppState> {
   return apiRequest<AppState>("/api/reservations", {
     method: "POST",
     body: JSON.stringify({ listingId })
   });
 }
 
-export async function sendRemoteMessage(
-  reservationId: string,
-  senderId: string,
-  body: string
-): Promise<AppState> {
+export async function sendRemoteMessage(reservationId: string, body: string): Promise<AppState> {
   return apiRequest<AppState>("/api/messages", {
     method: "POST",
     body: JSON.stringify({ reservationId, body })
   });
 }
 
-export async function updateRemoteReservationStatus(
-  reservationId: string,
-  actorId: string,
-  status: ReservationStatus
-): Promise<AppState> {
+export async function updateRemoteReservationStatus(reservationId: string, status: ReservationStatus): Promise<AppState> {
   return apiRequest<AppState>(`/api/reservations/${encodeURIComponent(reservationId)}/status`, {
     method: "POST",
     body: JSON.stringify({ status })
   });
 }
 
-export async function markRemoteNotificationsRead(userId: string): Promise<AppState> {
+export async function markRemoteNotificationsRead(): Promise<AppState> {
   return apiRequest<AppState>("/api/notifications/read", {
     method: "POST",
     body: JSON.stringify({})

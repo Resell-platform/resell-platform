@@ -1,6 +1,8 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import { seedState } from "./data/seed";
+import type { AppState, User } from "./data/types";
 
 function installLocalStorage() {
   const storage = new Map<string, string>();
@@ -22,6 +24,11 @@ function installLocalStorage() {
 describe("App user flows", () => {
   beforeEach(() => {
     installLocalStorage();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("creates a listing after tracking multi-image upload and removal state", async () => {
@@ -108,4 +115,107 @@ describe("App user flows", () => {
       expect(within(navigation).getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
   });
+
+  it("keeps browse public in Cloudflare mode when the visitor is logged out", async () => {
+    mockCloudflareSession(null);
+
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: /pick up items from local sellers/i })).toBeInTheDocument();
+    expect(await screen.findAllByText("Cloudflare D1")).not.toHaveLength(0);
+    expect(screen.getAllByRole("heading", { name: "Walnut writing desk" })).not.toHaveLength(0);
+    expect(screen.queryByText(/log in to browse/i)).not.toBeInTheDocument();
+  });
+
+  it("prompts login and does not reserve when a logged-out visitor clicks Reserve", async () => {
+    const fetchMock = mockCloudflareSession(null);
+
+    render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+    fireEvent.click(screen.getByRole("button", { name: /reserve item/i }));
+
+    expect(await screen.findAllByText(/log in with email to reserve this item/i)).not.toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/reservations",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
+
+  it("prompts login immediately when a logged-out visitor clicks Sell", async () => {
+    mockCloudflareSession(null);
+
+    render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+
+    expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/log in with email to sell an item/i)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /publish listing/i })).not.toBeInTheDocument();
+  });
+
+  it("prompts login immediately when a logged-out visitor clicks Chat", async () => {
+    mockCloudflareSession(null);
+
+    render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /chat/i }));
+
+    expect(await screen.findByRole("heading", { name: /log in to chat/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/log in with email to chat with buyers and sellers/i)).not.toHaveLength(0);
+    expect(screen.queryByPlaceholderText(/write a message/i)).not.toBeInTheDocument();
+  });
+
+  it("does not fall back to local demo actions in production when the Cloudflare API fails", async () => {
+    vi.stubEnv("DEV", false);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("API down");
+      })
+    );
+
+    render(<App />);
+
+    expect(await screen.findByText("API down")).toBeInTheDocument();
+    expect(screen.queryByText("Local demo")).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+
+    expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /publish listing/i })).not.toBeInTheDocument();
+  });
 });
+
+function mockCloudflareSession(user: User | null, state: AppState = cloudflarePublicState(user)) {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (path.endsWith("/api/me")) {
+      return jsonResponse({ user });
+    }
+    if (path.endsWith("/api/state")) {
+      return jsonResponse(state);
+    }
+    return jsonResponse({ error: "Unexpected test request" }, 500);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  return fetchMock;
+}
+
+function cloudflarePublicState(user: User | null): AppState {
+  return {
+    ...seedState,
+    activeUserId: user?.id ?? "",
+    reservations: user ? seedState.reservations : [],
+    messages: user ? seedState.messages : [],
+    notifications: []
+  };
+}
+
+function jsonResponse(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+}

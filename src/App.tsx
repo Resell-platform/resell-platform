@@ -53,9 +53,23 @@ const blankDraft: ListingDraft = {
   images: []
 };
 
+const emptyCloudState: AppState = {
+  users: [],
+  activeUserId: "",
+  listings: [],
+  reservations: [],
+  messages: [],
+  notifications: []
+};
+
 export default function App() {
-  const [state, setState] = useState<AppState>(() => computeOverdueNotifications(loadState()));
-  const [dataSource, setDataSource] = useState<"local" | "cloudflare">("local");
+  const allowLocalFallback = import.meta.env.DEV;
+  const [state, setState] = useState<AppState>(() =>
+    allowLocalFallback ? computeOverdueNotifications(loadState()) : emptyCloudState
+  );
+  const [dataSource, setDataSource] = useState<"local" | "cloudflare">(
+    allowLocalFallback ? "local" : "cloudflare"
+  );
   const [sessionUser, setSessionUser] = useState<User | null>(null);
   const [actionError, setActionError] = useState("");
   const [authMessage, setAuthMessage] = useState("");
@@ -80,15 +94,21 @@ export default function App() {
         setDataSource("cloudflare");
         setActionError("");
       })
-      .catch(() => {
+      .catch((error) => {
         if (!cancelled) {
-          setDataSource("local");
+          if (allowLocalFallback) {
+            setDataSource("local");
+            return;
+          }
+          setDataSource("cloudflare");
+          setState(emptyCloudState);
+          setActionError(error instanceof Error ? error.message : "Cloudflare API unavailable.");
         }
       });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [allowLocalFallback]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -136,6 +156,17 @@ export default function App() {
     setState(computeOverdueNotifications(nextState));
   }
 
+  function promptLogin(message: string) {
+    setAuthMessage(message);
+  }
+
+  function openProtectedView(nextView: View, message: string) {
+    if (dataSource === "cloudflare" && !sessionUser) {
+      promptLogin(message);
+    }
+    setView(nextView);
+  }
+
   async function runRemoteAction(action: () => Promise<AppState>) {
     try {
       const remoteState = await action();
@@ -152,11 +183,11 @@ export default function App() {
   async function handleReserve(listingId: string) {
     if (dataSource === "cloudflare") {
       if (!sessionUser) {
-        setAuthMessage("Log in or create an account to reserve this item.");
+        promptLogin("Log in with email to reserve this item.");
         return;
       }
       const beforeIds = new Set(state.reservations.map((reservation) => reservation.id));
-      const next = await runRemoteAction(() => reserveRemoteListing(listingId, sessionUser.id));
+      const next = await runRemoteAction(() => reserveRemoteListing(listingId));
       const reservation = next.reservations.find(
         (item) => item.listingId === listingId && item.buyerId === sessionUser.id && !beforeIds.has(item.id)
       );
@@ -188,10 +219,10 @@ export default function App() {
   async function handleCreateListing(draft: ListingDraft): Promise<boolean> {
     if (dataSource === "cloudflare") {
       if (!sessionUser) {
-        setAuthMessage("Create an account to publish your first listing.");
+        promptLogin("Log in with email to publish your first listing.");
         return false;
       }
-      const next = await runRemoteAction(() => createRemoteListing(sessionUser.id, draft));
+      const next = await runRemoteAction(() => createRemoteListing(draft));
       setSelectedListingId(next.listings[0].id);
       setView("browse");
       return true;
@@ -238,14 +269,29 @@ export default function App() {
         )}
         <nav>
           <NavButton icon={<Search />} label="Browse" active={view === "browse"} onClick={() => setView("browse")} />
-          <NavButton icon={<Upload />} label="Sell" active={view === "sell"} onClick={() => setView("sell")} />
-          <NavButton icon={<ShoppingBag />} label="Picked" active={view === "orders"} onClick={() => setView("orders")} />
-          <NavButton icon={<MessageSquare />} label="Chat" active={view === "chat"} onClick={() => setView("chat")} />
+          <NavButton
+            icon={<Upload />}
+            label="Sell"
+            active={view === "sell"}
+            onClick={() => openProtectedView("sell", "Log in with email to sell an item.")}
+          />
+          <NavButton
+            icon={<ShoppingBag />}
+            label="Picked"
+            active={view === "orders"}
+            onClick={() => openProtectedView("orders", "Log in with email to see your picked items.")}
+          />
+          <NavButton
+            icon={<MessageSquare />}
+            label="Chat"
+            active={view === "chat"}
+            onClick={() => openProtectedView("chat", "Log in with email to chat with buyers and sellers.")}
+          />
           <NavButton
             icon={<Bell />}
             label={`Alerts${unreadCount ? ` (${unreadCount})` : ""}`}
             active={view === "notifications"}
-            onClick={() => setView("notifications")}
+            onClick={() => openProtectedView("notifications", "Log in with email to see your alerts.")}
           />
         </nav>
         {dataSource === "local" && (
@@ -296,26 +342,33 @@ export default function App() {
             reserveListing={handleReserve}
           />
         )}
-        {view === "sell" && (
+        {dataSource === "cloudflare" && !sessionUser && view !== "browse" && (
+          <LoginRequiredPanel view={view} />
+        )}
+        {view === "sell" && !(dataSource === "cloudflare" && !sessionUser) && (
           <SellView activeUser={activeUser} onCreate={handleCreateListing} listings={state.listings} />
         )}
-        {view === "orders" && (
+        {view === "orders" && !(dataSource === "cloudflare" && !sessionUser) && (
           <OrdersView
             state={state}
             reservations={userReservations}
             activeUserId={activeUser?.id ?? ""}
             openChat={(id) => {
+              if (dataSource === "cloudflare" && !sessionUser) {
+                promptLogin("Log in with email to chat about picked items.");
+                return;
+              }
               setSelectedReservationId(id);
               setView("chat");
             }}
             updateStatus={(reservationId, status) =>
               dataSource === "cloudflare"
-                ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, activeUser?.id ?? "", status))
+                ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
           />
         )}
-        {view === "chat" && (
+        {view === "chat" && !(dataSource === "cloudflare" && !sessionUser) && (
           <ChatView
             state={state}
             activeUserId={activeUser?.id ?? ""}
@@ -324,27 +377,27 @@ export default function App() {
             reservations={userReservations}
             send={(reservationId, body) =>
               dataSource === "cloudflare"
-                ? runRemoteAction(() => sendRemoteMessage(reservationId, activeUser?.id ?? "", body))
+                ? runRemoteAction(() => sendRemoteMessage(reservationId, body))
                 : update(sendMessage(state, reservationId, activeUser?.id ?? "", body))
             }
             updateStatus={(reservationId, status) =>
               dataSource === "cloudflare"
-                ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, activeUser?.id ?? "", status))
+                ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
           />
         )}
-        {view === "notifications" && (
+        {view === "notifications" && !(dataSource === "cloudflare" && !sessionUser) && (
           <NotificationsView
             state={state}
             activeUserId={activeUser?.id ?? ""}
             markAllRead={() => {
               if (dataSource === "cloudflare") {
                 if (!sessionUser) {
-                  setAuthMessage("Log in to manage notifications.");
+                  promptLogin("Log in with email to manage notifications.");
                   return;
                 }
-                runRemoteAction(() => markRemoteNotificationsRead(sessionUser.id));
+                runRemoteAction(() => markRemoteNotificationsRead());
                 return;
               }
               const readAt = new Date().toISOString();
@@ -359,6 +412,42 @@ export default function App() {
         )}
       </main>
     </div>
+  );
+}
+
+function LoginRequiredPanel({ view }: { view: View }) {
+  const copy: Record<Exclude<View, "browse">, { eyebrow: string; title: string; body: string }> = {
+    sell: {
+      eyebrow: "Account required",
+      title: "Log in to sell",
+      body: "Use the email code form to create your profile before publishing a listing."
+    },
+    orders: {
+      eyebrow: "Account required",
+      title: "Log in to see picked items",
+      body: "Reservations, payment status, and alerts are tied to your verified profile."
+    },
+    chat: {
+      eyebrow: "Account required",
+      title: "Log in to chat",
+      body: "Chats open after you reserve an item or another buyer reserves one of your listings."
+    },
+    notifications: {
+      eyebrow: "Account required",
+      title: "Log in to see alerts",
+      body: "Payment reminders and unread message alerts are private to your account."
+    }
+  };
+  const content = copy[view as Exclude<View, "browse">];
+
+  return (
+    <section className="workspace">
+      <div className="panel login-required">
+        <p className="eyebrow">{content.eyebrow}</p>
+        <h1>{content.title}</h1>
+        <p>{content.body}</p>
+      </div>
+    </section>
   );
 }
 
@@ -480,9 +569,9 @@ function AccountPanel({
       <section className="account-panel">
         <div className="account-heading">
           <UserRound size={18} />
-          <strong>Create your account</strong>
+          <strong>Log in or create account</strong>
         </div>
-        <p>Reserve items, message sellers, and manage listings from one profile.</p>
+        <p>No password needed. We will email a one-time code.</p>
         {message && <p className="account-message">{message}</p>}
         <label>
           <span>Display name</span>
@@ -493,7 +582,7 @@ function AccountPanel({
           <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
         </label>
         <button className="secondary" disabled={pending || !email.trim()} onClick={requestCode}>
-          Send code
+          Send login code
         </button>
         <label>
           <span>Verification code</span>

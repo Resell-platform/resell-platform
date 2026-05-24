@@ -5,6 +5,9 @@ import { ApiError, jsonResponse } from "./http";
 const SESSION_COOKIE = "resell_session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const CHALLENGE_TTL_MS = 10 * 60 * 1000;
+const CHALLENGE_COOLDOWN_MS = 60 * 1000;
+const CHALLENGE_HOURLY_LIMIT = 5;
+const RESEND_EMAILS_URL = "https://api.resend.com/emails";
 
 export type CurrentUser = User & {
   email?: string;
@@ -51,16 +54,18 @@ export async function requestEmailCode(env: Env, email: string, displayName?: st
   if (!isValidEmail(normalizedEmail)) {
     throw new ApiError("Enter a valid email address.");
   }
+  await enforceEmailChallengeRateLimit(env, normalizedEmail);
 
   const code = createCode();
   const now = new Date();
+  const challengeId = createId("challenge");
   await env.DB.prepare(
     `INSERT INTO auth_challenges (
       id, email_normalized, display_name, code_hash, expires_at, created_at
     ) VALUES (?, ?, ?, ?, ?, ?)`
   )
     .bind(
-      createId("challenge"),
+      challengeId,
       normalizedEmail,
       displayName?.trim() || null,
       await hashSecret(`${normalizedEmail}:${code}`),
@@ -69,8 +74,18 @@ export async function requestEmailCode(env: Env, email: string, displayName?: st
     )
     .run();
 
-  // MVP delivery shim: replace this with a transactional email provider before public launch.
-  console.log(`Verification code for ${normalizedEmail}: ${code}`);
+  if (includeCode) {
+    console.log(`Development verification code for ${normalizedEmail}: ${code}`);
+  } else {
+    try {
+      await sendVerificationEmail(env, normalizedEmail, code);
+    } catch (error) {
+      await env.DB.prepare("UPDATE auth_challenges SET consumed_at = ? WHERE id = ?")
+        .bind(new Date().toISOString(), challengeId)
+        .run();
+      throw error;
+    }
+  }
 
   return {
     email: normalizedEmail,
@@ -275,10 +290,67 @@ function createCode() {
   return String(crypto.getRandomValues(new Uint32Array(1))[0] % 1_000_000).padStart(6, "0");
 }
 
+async function enforceEmailChallengeRateLimit(env: Env, email: string) {
+  const now = Date.now();
+  const since = new Date(now - 60 * 60 * 1000).toISOString();
+  const recent = await env.DB.prepare(
+    `SELECT COUNT(*) AS count, MAX(created_at) AS latest_created_at
+     FROM auth_challenges
+     WHERE email_normalized = ?
+       AND created_at > ?`
+  )
+    .bind(email, since)
+    .first<{ count: number; latest_created_at?: string | null }>();
+
+  const count = Number(recent?.count ?? 0);
+  const latestCreatedAt = recent?.latest_created_at ? Date.parse(recent.latest_created_at) : 0;
+  if (latestCreatedAt && now - latestCreatedAt < CHALLENGE_COOLDOWN_MS) {
+    throw new ApiError("Wait a minute before requesting another code.", 429);
+  }
+  if (count >= CHALLENGE_HOURLY_LIMIT) {
+    throw new ApiError("Too many login codes requested. Try again later.", 429);
+  }
+}
+
 async function hashSecret(secret: string) {
   const input = new TextEncoder().encode(secret);
   const digest = await crypto.subtle.digest("SHA-256", input);
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function sendVerificationEmail(env: Env, email: string, code: string) {
+  if (!env.RESEND_API_KEY || !env.AUTH_EMAIL_FROM) {
+    throw new ApiError("Email login is not configured. Set RESEND_API_KEY and AUTH_EMAIL_FROM.", 503);
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(RESEND_EMAILS_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "content-type": "application/json",
+        "idempotency-key": crypto.randomUUID(),
+        "user-agent": "resell-platform-cloudflare-auth"
+      },
+      body: JSON.stringify({
+        from: env.AUTH_EMAIL_FROM,
+        to: email,
+        subject: "Your Resell verification code",
+        text: `Your Resell verification code is ${code}. It expires in 10 minutes.`,
+        html: `<p>Your Resell verification code is <strong>${code}</strong>.</p><p>It expires in 10 minutes.</p>`
+      })
+    });
+  } catch (error) {
+    console.error("Resend email request failed.", error);
+    throw new ApiError("Could not send verification email. Try again in a few minutes.", 502);
+  }
+
+  if (!response.ok) {
+    const details = await response.text().catch(() => "");
+    console.error(`Resend email delivery failed (${response.status}): ${details}`);
+    throw new ApiError("Could not send verification email. Try again in a few minutes.", 502);
+  }
 }
 
 function getCookie(request: Request, name: string) {

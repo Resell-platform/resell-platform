@@ -17,7 +17,8 @@ const TERMINAL_RESERVATION_STATUSES = new Set<ReservationStatus>(["paid", "sold"
 export type Env = {
   DB: D1Database;
   LISTING_IMAGES?: R2Bucket;
-  AUTH_CODE_DEV_MODE?: string;
+  RESEND_API_KEY?: string;
+  AUTH_EMAIL_FROM?: string;
 };
 
 type UserRow = {

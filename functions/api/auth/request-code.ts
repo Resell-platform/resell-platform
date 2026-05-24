@@ -11,8 +11,7 @@ export const onRequestPost: PagesFunction<Env> = async ({ env, request }) =>
   handleApi(async () => {
     const body = await readJson<RequestCodeBody>(request);
     const url = new URL(request.url);
-    const includeCode =
-      env.AUTH_CODE_DEV_MODE === "true" || url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    const includeCode = url.hostname === "localhost" || url.hostname === "127.0.0.1";
     const result = await requestEmailCode(env, body.email, body.displayName, includeCode);
     return jsonResponse(result, { status: 201 });
   });
