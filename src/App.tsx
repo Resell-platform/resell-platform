@@ -8,6 +8,7 @@ import {
   Package,
   RefreshCcw,
   Search,
+  Share2,
   ShoppingBag,
   Store,
   Upload,
@@ -15,7 +16,6 @@ import {
 } from "lucide-react";
 import {
   computeOverdueNotifications,
-  createId,
   createListing,
   getPrimaryImage,
   getUserName,
@@ -33,20 +33,22 @@ import {
   exportRemoteData,
   fetchRemoteSession,
   fetchRemoteState,
-  logoutRemoteSession,
   markRemoteNotificationsRead,
-  requestRemoteEmailCode,
   reserveRemoteListing,
   sendRemoteMessage,
   updateRemoteListing,
   updateRemoteListingStatus,
-  updateRemoteProfile,
   updateRemoteReservationStatus,
-  verifyRemoteEmailCode,
   type ExportArchive
 } from "./data/remoteApi";
-import type { AppState, Listing, ListingDraft, ListingImage, ListingStatus, Reservation, User } from "./data/types";
+import type { AppState, Listing, ListingDraft, ListingStatus, Reservation, User } from "./data/types";
 import { categoryLabel, copy, statusLabel, type Copy, type Locale } from "./i18n";
+import {
+  buildListingSharePayload,
+  createWebPlatformAdapters,
+  type ImageUploadAdapter,
+  type LoginAdapter
+} from "./platform/adapters";
 
 type View = "browse" | "sell" | "orders" | "chat" | "notifications";
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -66,6 +68,8 @@ const blankDraft: ListingDraft = {
   location: "",
   images: []
 };
+
+const platformAdapters = createWebPlatformAdapters();
 
 function listingToDraft(listing: Listing): ListingDraft {
   return {
@@ -413,6 +417,34 @@ export default function App() {
     }
   }
 
+  async function handleShareListing(listing: Listing) {
+    const url = platformAdapters.deepLink.listingUrl(listing.id);
+    try {
+      const result = await platformAdapters.share.share(buildListingSharePayload(listing, url));
+      if (result.method === "clipboard") {
+        setAuthMessage(text.shareCopied);
+      } else if (result.method === "native") {
+        setAuthMessage(text.shareDone);
+      } else {
+        setAuthMessage(text.shareUnavailable);
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+      setAuthMessage(error instanceof Error ? error.message : text.shareUnavailable);
+    }
+  }
+
+  async function handleEnableNotifications() {
+    const permission = await platformAdapters.notification.requestPermission();
+    if (permission === "granted") {
+      setAuthMessage(text.alertsEnabled);
+      return;
+    }
+    setAuthMessage(text.alertsUnavailable);
+  }
+
   return (
     <div className="app">
       <aside className="sidebar" aria-label="Primary navigation">
@@ -435,6 +467,7 @@ export default function App() {
             user={sessionUser}
             message={authMessage}
             text={text}
+            loginAdapter={platformAdapters.login}
             onMessage={setAuthMessage}
             onExport={handleExportData}
             onAuthenticated={(user, nextState) => {
@@ -447,7 +480,7 @@ export default function App() {
               setState(nextState);
             }}
             onLogout={async () => {
-              await logoutRemoteSession();
+              await platformAdapters.login.logout();
               setSessionUser(null);
               setState(await fetchRemoteState(""));
               setView("browse");
@@ -504,6 +537,7 @@ export default function App() {
               user={sessionUser}
               message={authMessage}
               text={text}
+              loginAdapter={platformAdapters.login}
               onMessage={setAuthMessage}
               onExport={handleExportData}
               onAuthenticated={(user, nextState) => {
@@ -516,7 +550,7 @@ export default function App() {
                 setState(nextState);
               }}
               onLogout={async () => {
-                await logoutRemoteSession();
+                await platformAdapters.login.logout();
                 setSessionUser(null);
                 setState(await fetchRemoteState(""));
                 setView("browse");
@@ -536,6 +570,7 @@ export default function App() {
             setQuery={setQuery}
             selectListing={setSelectedListingId}
             reserveListing={handleReserve}
+            shareListing={handleShareListing}
             text={text}
             locale={locale}
           />
@@ -559,6 +594,7 @@ export default function App() {
                 ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
+            imageUploadAdapter={platformAdapters.imageUpload}
             text={text}
             locale={locale}
           />
@@ -575,6 +611,7 @@ export default function App() {
                 ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
+            paymentNotice={text.manualPaymentNotice}
             text={text}
             locale={locale}
           />
@@ -621,6 +658,8 @@ export default function App() {
                 )
               });
             }}
+            enableBrowserAlerts={handleEnableNotifications}
+            canEnableBrowserAlerts={platformAdapters.notification.canRequestPermission()}
             text={text}
             locale={locale}
           />
@@ -727,6 +766,7 @@ function AccountPanel({
   user,
   message,
   text,
+  loginAdapter,
   onMessage,
   onExport,
   onAuthenticated,
@@ -736,6 +776,7 @@ function AccountPanel({
   user: User | null;
   message: string;
   text: Copy;
+  loginAdapter: LoginAdapter;
   onMessage: (message: string) => void;
   onExport: () => void;
   onAuthenticated: (user: User, state: AppState) => void;
@@ -759,7 +800,7 @@ function AccountPanel({
   async function requestCode() {
     setPending(true);
     try {
-      const result = await requestRemoteEmailCode(email, displayName);
+      const result = await loginAdapter.requestEmailCode(email, displayName);
       setEmail(result.email);
       if (result.verificationCode) {
         setCode(result.verificationCode);
@@ -777,7 +818,7 @@ function AccountPanel({
   async function verifyCode() {
     setPending(true);
     try {
-      const result = await verifyRemoteEmailCode(email, code, displayName);
+      const result = await loginAdapter.verifyEmailCode(email, code, displayName);
       onAuthenticated(result.user, result.state);
     } catch (error) {
       onMessage(error instanceof Error ? error.message : text.verifyCodeFailed);
@@ -789,7 +830,7 @@ function AccountPanel({
   async function saveProfile() {
     setPending(true);
     try {
-      const result = await updateRemoteProfile({
+      const result = await loginAdapter.updateProfile({
         displayName: profileName,
         pickupArea,
         bio
@@ -879,6 +920,7 @@ function BrowseView({
   setQuery,
   selectListing,
   reserveListing,
+  shareListing,
   text,
   locale
 }: {
@@ -889,6 +931,7 @@ function BrowseView({
   setQuery: (query: string) => void;
   selectListing: (id: string) => void;
   reserveListing: (id: string) => void;
+  shareListing: (listing: Listing) => void;
   text: Copy;
   locale: Locale;
 }) {
@@ -953,6 +996,10 @@ function BrowseView({
               <ShoppingBag size={18} />
               {selectedListing.sellerId === activeUserId ? text.yourListing : text.reserveItem}
             </button>
+            <button className="secondary sticky-cta" onClick={() => shareListing(selectedListing)}>
+              <Share2 size={18} />
+              {text.share}
+            </button>
           </div>
         </article>
       )}
@@ -984,6 +1031,7 @@ function SellView({
   openOrder,
   updateStatus,
   updateReservation,
+  imageUploadAdapter,
   text,
   locale
 }: {
@@ -997,6 +1045,7 @@ function SellView({
   openOrder: (reservationId: string) => void;
   updateStatus: (listingId: string, status: Exclude<ListingStatus, "reserved">) => void;
   updateReservation: (reservationId: string, status: Reservation["status"]) => void;
+  imageUploadAdapter: ImageUploadAdapter;
   text: Copy;
   locale: Locale;
 }) {
@@ -1027,17 +1076,14 @@ function SellView({
   async function handleFiles(files: FileList | null) {
     if (!files) return;
     setUploadError("");
-    const rejected = Array.from(files).filter(
-      (file) => !file.type.startsWith("image/") || file.size > MAX_IMAGE_BYTES
-    );
-    const accepted = Array.from(files)
-      .filter((file) => file.type.startsWith("image/") && file.size <= MAX_IMAGE_BYTES)
-      .slice(0, Math.max(0, 6 - draft.images.length));
-    if (rejected.length > 0) {
-      setUploadError(text.imageUploadLimit);
-    }
     try {
-      const images = await Promise.all(accepted.map(readImage));
+      const { images, rejected } = await imageUploadAdapter.readImages(files, {
+        maxBytes: MAX_IMAGE_BYTES,
+        remainingSlots: 6 - draft.images.length
+      });
+      if (rejected.length > 0) {
+        setUploadError(text.imageUploadLimit);
+      }
       setDraft({ ...draft, images: [...draft.images, ...images] });
     } catch {
       setUploadError(text.imageReadFailed);
@@ -1047,17 +1093,14 @@ function SellView({
   async function handleEditFiles(files: FileList | null) {
     if (!files || !editDraft) return;
     setEditUploadError("");
-    const rejected = Array.from(files).filter(
-      (file) => !file.type.startsWith("image/") || file.size > MAX_IMAGE_BYTES
-    );
-    const accepted = Array.from(files)
-      .filter((file) => file.type.startsWith("image/") && file.size <= MAX_IMAGE_BYTES)
-      .slice(0, Math.max(0, 6 - editDraft.images.length));
-    if (rejected.length > 0) {
-      setEditUploadError(text.imageUploadLimit);
-    }
     try {
-      const images = await Promise.all(accepted.map(readImage));
+      const { images, rejected } = await imageUploadAdapter.readImages(files, {
+        maxBytes: MAX_IMAGE_BYTES,
+        remainingSlots: 6 - editDraft.images.length
+      });
+      if (rejected.length > 0) {
+        setEditUploadError(text.imageUploadLimit);
+      }
       setEditDraft({ ...editDraft, images: [...editDraft.images, ...images] });
     } catch {
       setEditUploadError(text.imageReadFailed);
@@ -1108,7 +1151,7 @@ function SellView({
           <input
             className="file-input"
             type="file"
-            accept="image/*"
+            accept={imageUploadAdapter.accept}
             multiple
             onChange={(event) => handleFiles(event.target.files)}
           />
@@ -1289,7 +1332,7 @@ function SellView({
                     <input
                       className="file-input"
                       type="file"
-                      accept="image/*"
+                      accept={imageUploadAdapter.accept}
                       multiple
                       onChange={(event) => handleEditFiles(event.target.files)}
                     />
@@ -1419,6 +1462,7 @@ function OrdersView({
   selectedReservationId,
   openChat,
   updateStatus,
+  paymentNotice,
   text,
   locale
 }: {
@@ -1428,6 +1472,7 @@ function OrdersView({
   selectedReservationId?: string;
   openChat: (id: string) => void;
   updateStatus: (reservationId: string, status: Reservation["status"]) => void;
+  paymentNotice: string;
   text: Copy;
   locale: Locale;
 }) {
@@ -1438,6 +1483,7 @@ function OrdersView({
           <div>
             <p className="eyebrow">{text.pickedItems}</p>
             <h1>{text.ordersHeading}</h1>
+            <p className="muted">{paymentNotice}</p>
           </div>
         </div>
         <div className="orders">
@@ -1591,12 +1637,16 @@ function NotificationsView({
   state,
   activeUserId,
   markAllRead,
+  enableBrowserAlerts,
+  canEnableBrowserAlerts,
   text,
   locale
 }: {
   state: AppState;
   activeUserId: string;
   markAllRead: () => void;
+  enableBrowserAlerts: () => void;
+  canEnableBrowserAlerts: boolean;
   text: Copy;
   locale: Locale;
 }) {
@@ -1612,10 +1662,18 @@ function NotificationsView({
             <p className="eyebrow">{text.notifications}</p>
             <h1>{text.notificationsHeading}</h1>
           </div>
-          <button className="secondary" disabled={unreadNotifications.length === 0} onClick={markAllRead}>
-            <CheckCircle2 size={16} />
-            {text.markRead}
-          </button>
+          <div className="button-row">
+            {canEnableBrowserAlerts && (
+              <button className="secondary" onClick={enableBrowserAlerts}>
+                <Bell size={16} />
+                {text.enableAlerts}
+              </button>
+            )}
+            <button className="secondary" disabled={unreadNotifications.length === 0} onClick={markAllRead}>
+              <CheckCircle2 size={16} />
+              {text.markRead}
+            </button>
+          </div>
         </div>
         <div className="notifications">
           {unreadNotifications.map((notification) => (
@@ -1631,20 +1689,4 @@ function NotificationsView({
       </div>
     </section>
   );
-}
-
-function readImage(file: File): Promise<ListingImage> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(reader.error);
-    reader.onload = () =>
-      resolve({
-        id: createId("image"),
-        name: file.name,
-        dataUrl: String(reader.result),
-        primary: false,
-        createdAt: new Date().toISOString()
-      });
-    reader.readAsDataURL(file);
-  });
 }

@@ -38,6 +38,7 @@ npm run build
 - Buyers can browse listings, reserve an available item, and open a reservation-scoped chat with the seller.
 - Cloudflare mode supports email-code account login, HttpOnly session cookies, editable profiles, and email/phone trust badge fields.
 - The H5/PWA web app supports English and Mandarin UI chrome for core marketplace workflows.
+- The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and explicit no-payment behavior.
 - Logged-in users can export their account, listings, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
 - The app does not process payments. It tracks off-platform payment status only.
 - Payment is due 24 hours after reservation. The app creates one buyer notification and one seller notification when an unpaid reservation becomes overdue.
@@ -114,4 +115,4 @@ npm run deploy
 - Backend layer: Cloudflare Pages Functions / Workers, D1, R2, Resend email login, HttpOnly sessions, and no payment provider.
 - Business model layer: User/Profile, Listing, ListingImage, Reservation, ChatMessage, Notification, TrustBadge, and ModerationStatus.
 - Frontend layer: current H5/PWA web app first; WeChat mini program, Xiaohongshu mini program, and Messenger WebView later.
-- Platform adapter layer: login, share, notification, image upload, deep link/open-in-app, and explicit no-payment adapters.
+- Platform adapter layer: `src/platform/adapters.ts` defines login, share, notification, image upload, deep link/open-in-app, and explicit no-payment adapters. The current implementation targets H5/PWA; WeChat, Xiaohongshu, and Messenger can add platform-specific implementations against the same contracts.
