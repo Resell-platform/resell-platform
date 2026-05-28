@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { requestRemoteEmailCode } from "./remoteApi";
+import { buildRealtimeSocketUrl, requestRemoteEmailCode } from "./remoteApi";
 
 describe("remote API errors", () => {
   afterEach(() => {
@@ -24,6 +24,15 @@ describe("remote API errors", () => {
 
     await expect(requestRemoteEmailCode("buyer@foxmail.com")).rejects.toThrow(
       "Service is temporarily unavailable. Try again in a few minutes."
+    );
+  });
+
+  it("builds same-origin realtime WebSocket URLs", () => {
+    expect(buildRealtimeSocketUrl({ protocol: "https:", host: "resell.example" })).toBe(
+      "wss://resell.example/api/realtime"
+    );
+    expect(buildRealtimeSocketUrl({ protocol: "http:", host: "localhost:8791" })).toBe(
+      "ws://localhost:8791/api/realtime"
     );
   });
 });

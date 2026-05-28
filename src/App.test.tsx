@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 import { seedState } from "./data/seed";
@@ -22,8 +22,11 @@ function installLocalStorage() {
 }
 
 describe("App user flows", () => {
+  let webSocketMock: ReturnType<typeof installWebSocketMock>;
+
   beforeEach(() => {
     installLocalStorage();
+    webSocketMock = installWebSocketMock();
   });
 
   afterEach(() => {
@@ -383,6 +386,51 @@ describe("App user flows", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("merges Cloudflare realtime message events without refetching state", async () => {
+    const fetchMock = mockCloudflareSession(seedState.users[0], cloudflarePublicState(seedState.users[0]));
+
+    render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+    await waitFor(() => {
+      expect(webSocketMock.instances).toHaveLength(1);
+    });
+    expect(webSocketMock.instances[0].url).toBe(
+      `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/api/realtime`
+    );
+
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /chat/i }));
+
+    act(() => {
+      webSocketMock.instances[0].receive(
+        JSON.stringify({
+          version: 1,
+          type: "message.created",
+          message: {
+            id: "message-realtime",
+            reservationId: "reservation-1",
+            senderId: "buyer-1",
+            body: "Still available for pickup?",
+            createdAt: "2026-05-28T12:00:00.000Z"
+          },
+          notification: {
+            id: "notification-realtime",
+            userId: "seller-1",
+            type: "message_received",
+            title: "New chat message",
+            body: "Jordan Lee sent a message.",
+            entityId: "reservation-1",
+            createdAt: "2026-05-28T12:00:00.000Z"
+          }
+        })
+      );
+    });
+
+    expect(await screen.findByText("Still available for pickup?")).toBeInTheDocument();
+    expect(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /alerts \(1\)/i })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/api/state"))).toHaveLength(1);
+  });
+
   it("submits Cloudflare seller reservation actions from My listings", async () => {
     const fetchMock = mockCloudflareSession(seedState.users[0], cloudflarePublicState(seedState.users[0]));
 
@@ -499,4 +547,52 @@ function jsonResponse(body: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json" }
   });
+}
+
+function installWebSocketMock() {
+  const instances: Array<{
+    url: string;
+    close: ReturnType<typeof vi.fn>;
+    addEventListener(type: string, listener: (event: { data?: string }) => void): void;
+    receive(data: string): void;
+    open(): void;
+  }> = [];
+
+  class MockWebSocket {
+    url: string;
+    private listeners = new Map<string, Set<(event: { data?: string }) => void>>();
+
+    constructor(url: string) {
+      this.url = url;
+      instances.push(this);
+      queueMicrotask(() => this.open());
+    }
+
+    addEventListener(type: string, listener: (event: { data?: string }) => void) {
+      const listeners = this.listeners.get(type) ?? new Set<(event: { data?: string }) => void>();
+      listeners.add(listener);
+      this.listeners.set(type, listeners);
+    }
+
+    close = vi.fn(() => {
+      this.emit("close", {});
+    });
+
+    receive(data: string) {
+      this.emit("message", { data });
+    }
+
+    open() {
+      this.emit("open", {});
+    }
+
+    private emit(type: string, event: { data?: string }) {
+      for (const listener of this.listeners.get(type) ?? []) {
+        listener(event);
+      }
+    }
+  }
+
+  vi.stubGlobal("WebSocket", MockWebSocket);
+  return { instances };
 }

@@ -19,6 +19,8 @@ Apply the D1 migrations to the local Wrangler database and run the Pages app wit
 
 ```bash
 npm run cf:d1:migrate:local
+npm run dev:realtime
+# in a second terminal
 npm run dev:cloudflare
 ```
 
@@ -61,6 +63,8 @@ The repository is configured for Cloudflare Pages Functions, D1, and R2:
 - Node version: `22.12.0` or newer
 - Pages Functions directory: `functions`
 - D1 binding: `DB`
+- Durable Object Worker: `resell-platform-realtime`
+- Durable Object binding: `CHAT_USER_HUB`
 - R2 binding: `LISTING_IMAGES` after R2 is enabled on the Cloudflare account
 - Required auth secrets/env vars: `RESEND_API_KEY`, `AUTH_EMAIL_FROM`
 
@@ -93,7 +97,7 @@ npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
 
 `AUTH_EMAIL_FROM` must be a sender address allowed by the Resend account, for example `Resell <login@your-verified-domain.com>`.
 
-Deploy the Pages app:
+Deploy the realtime Worker and Pages app:
 
 ```bash
 npm run deploy
@@ -102,11 +106,11 @@ npm run deploy
 ## Cloudflare Architecture
 
 - D1 stores profiles, auth challenges, auth sessions, listings, listing image metadata, reservations, chat messages, and notifications.
-- Pages Functions expose email-code auth, `/api/me`, `/api/state`, `/api/listings`, `/api/reservations`, `/api/messages`, reservation status updates, and notification read actions.
+- Pages Functions expose email-code auth, `/api/me`, `/api/state`, `/api/listings`, `/api/reservations`, `/api/messages`, `/api/realtime`, reservation status updates, and notification read actions.
 - Pages Functions expose `/api/export` for authenticated JSON export across the unified business models.
 - Protected mutations derive the actor from the HttpOnly session cookie instead of trusting browser-submitted user IDs.
 - Reservation creation updates listing availability in D1 with a conditional update, so a second buyer cannot reserve the same available item.
-- Chat writes messages to D1 after checking the sender is the reservation buyer or seller.
+- Chat writes messages to D1 after checking the sender is the reservation buyer or seller, then broadcasts a realtime event through the per-user `ChatUserHub` Durable Object so connected tabs refresh immediately.
 - When the `LISTING_IMAGES` R2 binding is configured, new listing uploads store image bytes in R2 and D1 stores the served image path plus R2 key.
 - Until R2 is enabled, the Functions fallback stores uploaded image data URLs in D1 so the platform can still run with a real shared database.
 

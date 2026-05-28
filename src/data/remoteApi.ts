@@ -1,4 +1,14 @@
-import type { AppState, ListingDraft, ListingStatus, ModerationStatus, ReservationStatus, TrustBadge, User } from "./types";
+import type {
+  AppState,
+  ListingDraft,
+  ListingStatus,
+  Message,
+  ModerationStatus,
+  Notification,
+  ReservationStatus,
+  TrustBadge,
+  User
+} from "./types";
 
 export type RemoteSession = {
   user: User | null;
@@ -29,6 +39,34 @@ export type ExportArchive = {
   moderationStatuses: ModerationStatus[];
   state: AppState;
 };
+
+export type RealtimeEvent =
+  | {
+      version: 1;
+      type: "connected";
+      userId: string;
+      serverTime: string;
+    }
+  | {
+      version: 1;
+      type: "message.created";
+      message: Message;
+      notification?: Notification;
+    }
+  | {
+      version: 1;
+      type: "sync.required";
+      reason?: string;
+    };
+
+export function buildRealtimeSocketUrl(location: Pick<Location, "protocol" | "host"> = window.location): string {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${location.host}/api/realtime`;
+}
+
+export function connectRealtimeSocket(): WebSocket {
+  return new WebSocket(buildRealtimeSocketUrl());
+}
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {

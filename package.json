@@ -8,16 +8,20 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:cloudflare": "npm run build && wrangler pages dev dist --compatibility-date=2026-05-23",
+    "dev:cloudflare": "npm run build && wrangler pages dev dist --compatibility-date=2026-05-23 --do CHAT_USER_HUB=ChatUserHub@resell-platform-realtime",
+    "dev:realtime": "wrangler dev --config workers/realtime/wrangler.toml",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "typecheck": "npm run typecheck:functions && npm run typecheck:realtime",
     "typecheck:functions": "tsc -p tsconfig.functions.json --noEmit",
+    "typecheck:realtime": "tsc -p workers/realtime/tsconfig.json --noEmit",
     "cf:d1:create": "wrangler d1 create resell-platform-db",
     "cf:d1:migrate:local": "wrangler d1 migrations apply resell-platform-db --local",
     "cf:d1:migrate:remote": "wrangler d1 migrations apply resell-platform-db --remote",
     "cf:r2:create": "wrangler r2 bucket create resell-platform-images",
-    "deploy": "npm run build && wrangler pages deploy dist"
+    "deploy:realtime": "wrangler deploy --config workers/realtime/wrangler.toml",
+    "deploy": "npm run build && npm run deploy:realtime && wrangler pages deploy dist"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
