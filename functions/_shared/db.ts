@@ -19,6 +19,7 @@ const LISTING_CONDITIONS = new Set<Listing["condition"]>(["new", "like_new", "go
 
 export type Env = {
   DB: D1Database;
+  CHAT_USER_HUB?: DurableObjectNamespace;
   LISTING_IMAGES?: R2Bucket;
   RESEND_API_KEY?: string;
   AUTH_EMAIL_FROM?: string;
@@ -88,6 +89,12 @@ type NotificationRow = {
   entity_id?: string | null;
   read_at?: string | null;
   created_at: string;
+};
+
+export type SendMessageResult = {
+  message: Message;
+  notification: Notification;
+  participantUserIds: string[];
 };
 
 export function createId(prefix: string) {
@@ -428,32 +435,59 @@ export async function updateListingStatusInDb(
   }
 }
 
-export async function sendMessageInDb(db: D1Database, reservationId: string, senderId: string, body: string) {
+export async function sendMessageInDb(
+  db: D1Database,
+  reservationId: string,
+  senderId: string,
+  body: string
+): Promise<SendMessageResult> {
   const trimmed = body.trim();
   if (!trimmed) throw new ApiError("Message body is required.");
 
   const reservation = await getReservationForParticipant(db, reservationId, senderId);
-  const listing = await db.prepare("SELECT title FROM listings WHERE id = ?").bind(reservation.listing_id).first<{ title: string }>();
+  const listing = await db
+    .prepare("SELECT title FROM listings WHERE id = ?")
+    .bind(reservation.listing_id)
+    .first<{ title: string }>();
   const now = new Date().toISOString();
+  const messageId = createId("message");
+  const notificationId = createId("notification");
   const receiverId = reservation.seller_id === senderId ? reservation.buyer_id : reservation.seller_id;
+  const notificationBody = `${await getUserName(db, senderId)} sent a message about ${
+    listing?.title ?? "a listing"
+  }.`;
 
   await db.batch([
     db
       .prepare("INSERT INTO messages (id, reservation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(createId("message"), reservationId, senderId, trimmed, now),
+      .bind(messageId, reservationId, senderId, trimmed, now),
     db
       .prepare(
         `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
          VALUES (?, ?, 'message_received', 'New message', ?, ?, ?)`
       )
-      .bind(
-        createId("notification"),
-        receiverId,
-        `${await getUserName(db, senderId)} sent a message about ${listing?.title ?? "a listing"}.`,
-        reservationId,
-        now
-      )
+      .bind(notificationId, receiverId, notificationBody, reservationId, now)
   ]);
+
+  return {
+    message: {
+      id: messageId,
+      reservationId,
+      senderId,
+      body: trimmed,
+      createdAt: now
+    },
+    notification: {
+      id: notificationId,
+      userId: receiverId,
+      type: "message_received",
+      title: "New message",
+      body: notificationBody,
+      entityId: reservationId,
+      createdAt: now
+    },
+    participantUserIds: [reservation.buyer_id, reservation.seller_id]
+  };
 }
 
 export async function updateReservationStatusInDb(

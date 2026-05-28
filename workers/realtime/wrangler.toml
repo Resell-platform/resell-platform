@@ -1,0 +1,11 @@
+name = "resell-platform-realtime"
+main = "src/index.ts"
+compatibility_date = "2026-05-23"
+
+[[durable_objects.bindings]]
+name = "CHAT_USER_HUB"
+class_name = "ChatUserHub"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatUserHub"]

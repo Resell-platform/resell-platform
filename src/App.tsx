@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CheckCircle2,
@@ -29,6 +29,7 @@ import {
 } from "./data/store";
 import {
   createRemoteListing,
+  connectRealtimeSocket,
   exportRemoteData,
   fetchRemoteSession,
   fetchRemoteState,
@@ -38,9 +39,10 @@ import {
   updateRemoteListing,
   updateRemoteListingStatus,
   updateRemoteReservationStatus,
-  type ExportArchive
+  type ExportArchive,
+  type RealtimeEvent
 } from "./data/remoteApi";
-import type { AppState, Listing, ListingDraft, ListingStatus, Reservation, User } from "./data/types";
+import type { AppState, Listing, ListingDraft, ListingStatus, Message, Notification, Reservation, User } from "./data/types";
 import { categoryLabel, copy, statusLabel, type Copy, type Locale } from "./i18n";
 import {
   buildListingSharePayload,
@@ -172,6 +174,49 @@ function getInitialLocale(): Locale {
   return stored === "zh" ? "zh" : "en";
 }
 
+function parseRealtimeEvent(data: unknown): RealtimeEvent | null {
+  if (typeof data !== "string") return null;
+
+  try {
+    const event = JSON.parse(data) as Partial<RealtimeEvent>;
+    if (event.version !== 1 || typeof event.type !== "string") return null;
+
+    if (event.type === "connected") {
+      return typeof event.userId === "string" && typeof event.serverTime === "string"
+        ? (event as RealtimeEvent)
+        : null;
+    }
+
+    if (event.type === "message.created") {
+      const message = (event as { message?: Partial<Message> }).message;
+      const notification = (event as { notification?: Partial<Notification> }).notification;
+      const messageIsValid =
+        typeof message === "object" &&
+        message !== null &&
+        typeof message.id === "string" &&
+        typeof message.reservationId === "string" &&
+        typeof message.senderId === "string" &&
+        typeof message.body === "string" &&
+        typeof message.createdAt === "string";
+      const notificationIsValid =
+        notification === undefined ||
+        (typeof notification === "object" &&
+          notification !== null &&
+          typeof notification.id === "string" &&
+          typeof notification.userId === "string");
+      return messageIsValid && notificationIsValid ? (event as RealtimeEvent) : null;
+    }
+
+    if (event.type === "sync.required") {
+      return event.reason === undefined || typeof event.reason === "string" ? (event as RealtimeEvent) : null;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export default function App() {
   const allowLocalFallback = import.meta.env.DEV;
   const [locale, setLocale] = useState<Locale>(getInitialLocale);
@@ -188,6 +233,7 @@ export default function App() {
   const [selectedListingId, setSelectedListingId] = useState<string | null>("listing-1");
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>("reservation-1");
   const [query, setQuery] = useState("");
+  const realtimeSocketRef = useRef<WebSocket | null>(null);
   const text = copy[locale];
 
   useEffect(() => {
@@ -242,6 +288,141 @@ export default function App() {
     }, 60_000);
     return () => window.clearInterval(id);
   }, [dataSource, state.activeUserId]);
+
+  useEffect(() => {
+    if (dataSource !== "cloudflare" || !sessionUser) return;
+    if (typeof WebSocket === "undefined") return;
+
+    const realtimeUserId = sessionUser.id;
+    let active = true;
+    let reconnectAttempt = 0;
+    let hasOpened = false;
+    let reconnectTimer: number | null = null;
+    let refreshTimer: number | null = null;
+    let refreshInFlight = false;
+    let lastRefreshAt = 0;
+
+    function refreshRemoteState() {
+      if (!active || refreshInFlight || refreshTimer !== null) return;
+
+      const elapsed = Date.now() - lastRefreshAt;
+      const delay = Math.max(0, 750 - elapsed);
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = null;
+        refreshInFlight = true;
+        fetchRemoteState("")
+          .then((remoteState) => {
+            if (!active) return;
+            setState(remoteState);
+            setActionError("");
+          })
+          .catch((error) => {
+            if (active) {
+              setActionError(error instanceof Error ? error.message : text.cloudflareRequestFailed);
+            }
+          })
+          .finally(() => {
+            refreshInFlight = false;
+            lastRefreshAt = Date.now();
+          });
+      }, delay);
+    }
+
+    function mergeMessageEvent(event: Extract<RealtimeEvent, { type: "message.created" }>) {
+      setState((current) => {
+        const messageExists = current.messages.some((message) => message.id === event.message.id);
+        const messages = messageExists
+          ? current.messages.map((message) => (message.id === event.message.id ? event.message : message))
+          : [...current.messages, event.message];
+
+        if (!event.notification || event.notification.userId !== realtimeUserId) {
+          return { ...current, messages };
+        }
+
+        const notification = event.notification;
+        const notificationExists = current.notifications.some(
+          (currentNotification) => currentNotification.id === notification.id
+        );
+        const notifications = notificationExists
+          ? current.notifications.map((currentNotification) =>
+              currentNotification.id === notification.id ? notification : currentNotification
+            )
+          : [...current.notifications, notification];
+
+        return { ...current, messages, notifications };
+      });
+    }
+
+    function scheduleReconnect() {
+      if (!active || reconnectTimer !== null) return;
+      const delay = Math.min(1_000 * 2 ** reconnectAttempt, 10_000);
+      reconnectAttempt += 1;
+      reconnectTimer = window.setTimeout(() => {
+        reconnectTimer = null;
+        openSocket();
+      }, delay);
+    }
+
+    function openSocket() {
+      if (!active) return;
+
+      try {
+        const socket = connectRealtimeSocket();
+        realtimeSocketRef.current = socket;
+
+        socket.addEventListener("open", () => {
+          const wasReconnect = hasOpened || reconnectAttempt > 0;
+          reconnectAttempt = 0;
+          if (wasReconnect) {
+            refreshRemoteState();
+          }
+          hasOpened = true;
+        });
+        socket.addEventListener("message", (messageEvent) => {
+          const event = parseRealtimeEvent(messageEvent.data);
+
+          if (!event || event.type === "sync.required") {
+            refreshRemoteState();
+            return;
+          }
+
+          if (event.type === "connected") {
+            if (event.userId !== realtimeUserId) {
+              refreshRemoteState();
+            }
+            return;
+          }
+
+          mergeMessageEvent(event);
+        });
+        socket.addEventListener("close", () => {
+          if (realtimeSocketRef.current !== socket) return;
+          scheduleReconnect();
+        });
+        socket.addEventListener("error", () => {
+          if (realtimeSocketRef.current !== socket) return;
+          socket.close();
+          scheduleReconnect();
+        });
+      } catch {
+        scheduleReconnect();
+      }
+    }
+
+    openSocket();
+
+    return () => {
+      active = false;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      realtimeSocketRef.current?.close();
+      realtimeSocketRef.current = null;
+    };
+  }, [dataSource, sessionUser?.id, text.cloudflareRequestFailed]);
 
   const activeUser =
     dataSource === "cloudflare"
