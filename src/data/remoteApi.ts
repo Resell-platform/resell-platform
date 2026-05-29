@@ -26,7 +26,7 @@ export type AuthStateResponse = {
 };
 
 export type ExportArchive = {
-  formatVersion: 1;
+  formatVersion: 2;
   exportedAt: string;
   architecture: {
     backend: string[];

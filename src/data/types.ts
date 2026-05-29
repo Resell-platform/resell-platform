@@ -48,6 +48,19 @@ export type ListingImage = {
   createdAt: string;
 };
 
+export const MAX_LISTING_ITEMS = 12;
+
+export type ListingItem = {
+  id: string;
+  listingId?: string;
+  name: string;
+  price?: number;
+  condition?: ListingCondition;
+  notes?: string;
+  position: number;
+  createdAt: string;
+};
+
 export type Listing = {
   id: string;
   sellerId: string;
@@ -58,6 +71,7 @@ export type Listing = {
   condition: ListingCondition;
   location: string;
   images: ListingImage[];
+  items: ListingItem[];
   status: ListingStatus;
   moderationStatus?: ModerationStatus;
   createdAt: string;
@@ -131,6 +145,7 @@ export type ListingDraft = {
   condition: ListingCondition;
   location: string;
   images: ListingImage[];
+  items: ListingItem[];
 };
 
 export type RegistrationDraft = {

@@ -51,6 +51,18 @@ export const seedState: AppState = {
       status: "available",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
+      items: [
+        {
+          id: "listing-1-item-1",
+          listingId: "listing-1",
+          name: "Walnut writing desk",
+          price: 180,
+          condition: "good",
+          notes: "Compact desk with two drawers. Minor wear on the top edge.",
+          position: 0,
+          createdAt: now.toISOString()
+        }
+      ],
       images: [
         {
           id: "image-1",
@@ -74,6 +86,28 @@ export const seedState: AppState = {
       status: "reserved",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
+      items: [
+        {
+          id: "listing-2-item-1",
+          listingId: "listing-2",
+          name: "Mirrorless camera body",
+          price: 430,
+          condition: "like_new",
+          notes: "Camera body with battery and strap.",
+          position: 0,
+          createdAt: now.toISOString()
+        },
+        {
+          id: "listing-2-item-2",
+          listingId: "listing-2",
+          name: "35mm lens",
+          price: 90,
+          condition: "like_new",
+          notes: "Starter prime lens included in the kit.",
+          position: 1,
+          createdAt: now.toISOString()
+        }
+      ],
       images: [
         {
           id: "image-2",

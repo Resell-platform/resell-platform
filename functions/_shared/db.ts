@@ -1,14 +1,16 @@
-import type {
-  AppState,
-  Listing,
-  ListingDraft,
-  ListingImage,
-  ListingStatus,
-  Message,
-  Notification,
-  Reservation,
-  ReservationStatus,
-  User
+import {
+  MAX_LISTING_ITEMS,
+  type AppState,
+  type Listing,
+  type ListingDraft,
+  type ListingImage,
+  type ListingItem,
+  type ListingStatus,
+  type Message,
+  type Notification,
+  type Reservation,
+  type ReservationStatus,
+  type User
 } from "../../src/data/types";
 import { ApiError } from "./http";
 
@@ -60,6 +62,17 @@ type ListingImageRow = {
   created_at: string;
 };
 
+type ListingItemRow = {
+  id: string;
+  listing_id: string;
+  name: string;
+  price?: number | null;
+  condition?: Listing["condition"] | null;
+  notes?: string | null;
+  position: number;
+  created_at: string;
+};
+
 type ReservationRow = {
   id: string;
   listing_id: string;
@@ -108,7 +121,7 @@ type StateUser = {
 export async function readState(db: D1Database, currentUser?: StateUser): Promise<AppState> {
   await markOverdueReservations(db);
 
-  const [users, listings, images] = await Promise.all([
+  const [users, listings, images, items] = await Promise.all([
     db
       .prepare(
         `SELECT id, name, role, email_verified_at, phone_verified_at, pickup_area, bio, avatar_url
@@ -117,7 +130,8 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
       )
       .all<UserRow>(),
     db.prepare("SELECT * FROM listings ORDER BY created_at DESC").all<ListingRow>(),
-    db.prepare("SELECT * FROM listing_images ORDER BY created_at").all<ListingImageRow>()
+    db.prepare("SELECT * FROM listing_images ORDER BY created_at").all<ListingImageRow>(),
+    db.prepare("SELECT * FROM listing_items ORDER BY listing_id, position, created_at").all<ListingItemRow>()
   ]);
   const reservations = currentUser
     ? await db
@@ -161,6 +175,22 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
     imagesByListing.set(row.listing_id, listingImages);
   }
 
+  const itemsByListing = new Map<string, ListingItem[]>();
+  for (const row of items.results) {
+    const listingItems = itemsByListing.get(row.listing_id) ?? [];
+    listingItems.push({
+      id: row.id,
+      listingId: row.listing_id,
+      name: row.name,
+      price: row.price ?? undefined,
+      condition: row.condition ?? undefined,
+      notes: row.notes ?? undefined,
+      position: row.position,
+      createdAt: row.created_at
+    });
+    itemsByListing.set(row.listing_id, listingItems);
+  }
+
   return {
     users: users.results.map((row) => ({
       id: row.id,
@@ -173,20 +203,9 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
       avatarUrl: row.avatar_url ?? undefined
     })),
     activeUserId: currentUser?.id ?? "",
-    listings: listings.results.map((row) => ({
-      id: row.id,
-      sellerId: row.seller_id,
-      title: row.title,
-      description: row.description,
-      price: row.price,
-      category: row.category,
-      condition: row.condition,
-      location: row.location,
-      status: row.status,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-      images: imagesByListing.get(row.id) ?? []
-    })),
+    listings: listings.results.map((row) =>
+      normalizeListingFromRow(row, imagesByListing.get(row.id) ?? [], itemsByListing.get(row.id) ?? [])
+    ),
     reservations: reservations.results.map((row) => ({
       id: row.id,
       listingId: row.listing_id,
@@ -228,6 +247,7 @@ export async function createListingInDb(env: Env, sellerId: string, draft: Listi
 
   const now = new Date().toISOString();
   const listingId = createId("listing");
+  const items = normalizeDraftItems(draft, listingId, now);
   const images = await Promise.all(
     draft.images.map((image, index) => persistListingImage(env, listingId, image, index === 0, now))
   );
@@ -265,6 +285,23 @@ export async function createListingInDb(env: Env, sellerId: string, draft: Listi
           image.primary ? 1 : 0,
           now
         )
+    ),
+    ...items.map((item) =>
+      db
+        .prepare(
+          `INSERT INTO listing_items (id, listing_id, name, price, condition, notes, position, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          item.id,
+          listingId,
+          item.name,
+          item.price ?? null,
+          item.condition ?? null,
+          item.notes ?? null,
+          item.position,
+          item.createdAt
+        )
     )
   ]);
 }
@@ -286,6 +323,7 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
   }
 
   const now = new Date().toISOString();
+  const items = normalizeDraftItems(draft, listingId, now);
   const images = await Promise.all(
     draft.images.map((image, index) => persistListingImage(env, listingId, image, index === 0, now))
   );
@@ -329,6 +367,7 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
 
   await db.batch([
     db.prepare("DELETE FROM listing_images WHERE listing_id = ?").bind(listingId),
+    db.prepare("DELETE FROM listing_items WHERE listing_id = ?").bind(listingId),
     ...images.map((image) =>
       db
         .prepare(
@@ -343,6 +382,23 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
           image.r2Key ?? null,
           image.primary ? 1 : 0,
           now
+        )
+    ),
+    ...items.map((item) =>
+      db
+        .prepare(
+          `INSERT INTO listing_items (id, listing_id, name, price, condition, notes, position, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .bind(
+          item.id,
+          listingId,
+          item.name,
+          item.price ?? null,
+          item.condition ?? null,
+          item.notes ?? null,
+          item.position,
+          item.createdAt
         )
     )
   ]);
@@ -624,7 +680,110 @@ async function getUserName(db: D1Database, userId: string) {
   return user?.name ?? "Someone";
 }
 
+function normalizeListingFromRow(row: ListingRow, images: ListingImage[], items: ListingItem[]): Listing {
+  const listing: Listing = {
+    id: row.id,
+    sellerId: row.seller_id,
+    title: row.title,
+    description: row.description,
+    price: row.price,
+    category: row.category,
+    condition: row.condition,
+    location: row.location,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    images,
+    items
+  };
+
+  return {
+    ...listing,
+    items: normalizeListingItems(listing)
+  };
+}
+
+function normalizeListingItems(listing: Listing): ListingItem[] {
+  const normalized = listing.items
+    .map((item, index) => normalizeListingItem(item, listing.id, listing.createdAt, index))
+    .filter((item): item is ListingItem => Boolean(item));
+
+  if (normalized.length > 0) return normalized;
+
+  return [
+    {
+      id: `${listing.id}-item-1`,
+      listingId: listing.id,
+      name: listing.title.trim() || "Item",
+      price: listing.price,
+      condition: listing.condition,
+      notes: listing.description.trim() || undefined,
+      position: 0,
+      createdAt: listing.createdAt
+    }
+  ];
+}
+
+function normalizeDraftItems(draft: ListingDraft, listingId: string, createdAt: string): ListingItem[] {
+  const listing: Listing = {
+    id: listingId,
+    sellerId: "",
+    title: draft.title,
+    description: draft.description,
+    price: draft.price,
+    category: draft.category,
+    condition: draft.condition,
+    location: draft.location,
+    images: draft.images,
+    items: Array.isArray(draft.items) ? draft.items : [],
+    status: "available",
+    createdAt,
+    updatedAt: createdAt
+  };
+  return normalizeListingItems(listing);
+}
+
+function draftItems(draft: ListingDraft): ListingItem[] {
+  return Array.isArray(draft.items) ? draft.items : [];
+}
+
+function hasItemContent(item: ListingItem): boolean {
+  return Boolean(
+    item.name?.trim() ||
+      item.notes?.trim() ||
+      (Number.isFinite(item.price) && Number(item.price) > 0) ||
+      item.condition
+  );
+}
+
+function normalizeListingItem(
+  item: ListingItem,
+  listingId: string,
+  createdAt: string,
+  index: number
+): ListingItem | undefined {
+  const name = item.name?.trim();
+  if (!name) return undefined;
+
+  const notes = item.notes?.trim();
+  const price = Number.isFinite(item.price) && Number(item.price) > 0 ? Number(item.price) : undefined;
+  const condition = item.condition && LISTING_CONDITIONS.has(item.condition) ? item.condition : undefined;
+
+  return {
+    id: item.id || createId("item"),
+    listingId,
+    name,
+    price,
+    condition,
+    notes: notes || undefined,
+    position: index,
+    createdAt: item.createdAt || createdAt
+  };
+}
+
 function validateListingDraft(draft: ListingDraft) {
+  const items = normalizeDraftItems(draft, "validation-listing", new Date().toISOString());
+  const rawItems = draftItems(draft);
   if (
     !draft.title.trim() ||
     !draft.description.trim() ||
@@ -640,6 +799,15 @@ function validateListingDraft(draft: ListingDraft) {
   }
   if (draft.images.length === 0 || draft.images.length > 6) {
     throw new ApiError("Listings must include 1-6 images.");
+  }
+  if (rawItems.length > MAX_LISTING_ITEMS) {
+    throw new ApiError(`Posts must include no more than ${MAX_LISTING_ITEMS} items.`);
+  }
+  if (rawItems.some((item) => hasItemContent(item) && !item.name?.trim())) {
+    throw new ApiError("Every post item with details must include a name.");
+  }
+  if (items.length === 0) {
+    throw new ApiError("Posts must include at least one item.");
   }
 }
 

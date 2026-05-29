@@ -14,7 +14,7 @@ import {
   updateReservationStatus
 } from "./store";
 import { seedState } from "./seed";
-import type { AppState, ListingDraft } from "./types";
+import { MAX_LISTING_ITEMS, type AppState, type ListingDraft } from "./types";
 
 const draft: ListingDraft = {
   title: "Road bike",
@@ -23,6 +23,17 @@ const draft: ListingDraft = {
   category: "Outdoor",
   condition: "good",
   location: "Local pickup",
+  items: [
+    {
+      id: "draft-item",
+      name: "Road bike",
+      price: 420,
+      condition: "good",
+      notes: "Aluminum frame",
+      position: 0,
+      createdAt: "2026-05-23T10:00:00.000Z"
+    }
+  ],
   images: [
     {
       id: "draft-image",
@@ -132,13 +143,84 @@ describe("store state transitions", () => {
   });
 
   it("creates a listing with image metadata and available status", () => {
-    const next = createListing(seedState, "seller-1", draft);
+    const next = createListing(seedState, "seller-1", {
+      ...draft,
+      items: [
+        ...draft.items,
+        {
+          id: "draft-item-2",
+          name: "Helmet",
+          price: 35,
+          condition: "like_new",
+          notes: "Medium",
+          position: 1,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]
+    });
     const listing = next.listings[0];
 
     expect(listing.title).toBe("Road bike");
     expect(listing.status).toBe("available");
+    expect(listing.items).toMatchObject([
+      {
+        listingId: listing.id,
+        name: "Road bike",
+        price: 420,
+        position: 0
+      },
+      {
+        listingId: listing.id,
+        name: "Helmet",
+        price: 35,
+        position: 1
+      }
+    ]);
     expect(listing.images).toHaveLength(1);
     expect(listing.images[0].primary).toBe(true);
+  });
+
+  it("rejects partial item rows and posts over the item limit", () => {
+    const partialItem = createListing(seedState, "seller-1", {
+      ...draft,
+      items: [
+        {
+          id: "draft-partial",
+          name: "",
+          price: 25,
+          position: 0,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]
+    });
+    const tooManyItems = createListing(seedState, "seller-1", {
+      ...draft,
+      items: Array.from({ length: MAX_LISTING_ITEMS + 1 }, (_, index) => ({
+        id: `draft-item-${index}`,
+        name: `Item ${index + 1}`,
+        price: 10 + index,
+        position: index,
+        createdAt: "2026-05-23T10:00:00.000Z"
+      }))
+    });
+
+    expect(partialItem).toBe(seedState);
+    expect(tooManyItems).toBe(seedState);
+  });
+
+  it("defaults one listing item from post fields when old drafts do not send items", () => {
+    const { items: _items, ...legacyDraft } = draft;
+    const next = createListing(seedState, "seller-1", legacyDraft as ListingDraft);
+    const listing = next.listings[0];
+
+    expect(listing.items).toHaveLength(1);
+    expect(listing.items[0]).toMatchObject({
+      listingId: listing.id,
+      name: "Road bike",
+      price: 420,
+      condition: "good",
+      notes: "Aluminum frame, recently tuned."
+    });
   });
 
   it("reserves an available listing once and prevents a second reservation", () => {
@@ -209,6 +291,12 @@ describe("store state transitions", () => {
 
     expect(listing?.title).toBe("Updated road bike");
     expect(listing?.price).toBe(460);
+    expect(listing?.items).toMatchObject([
+      {
+        name: "Road bike",
+        position: 0
+      }
+    ]);
     expect(listing?.images).toHaveLength(2);
     expect(listing?.images[0].primary).toBe(true);
     expect(listing?.images[1].primary).toBe(false);
@@ -253,6 +341,7 @@ describe("store state transitions", () => {
     const denied = sendMessage(seedState, "reservation-1", "buyer-2", "Can I see this?");
 
     expect(allowed.messages).toHaveLength(seedState.messages.length + 1);
+    expect(allowed.listings.find((listing) => listing.id === "listing-2")?.items).toHaveLength(2);
     expect(denied.messages).toHaveLength(seedState.messages.length);
   });
 

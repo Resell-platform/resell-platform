@@ -17,7 +17,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
 
     return jsonResponse(
       {
-        formatVersion: 1,
+        formatVersion: 2,
         exportedAt: new Date().toISOString(),
         architecture: {
           backend: [
@@ -30,7 +30,8 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
           ],
           businessModels: [
             "User / Profile",
-            "Listing",
+            "Listing / Seller Post",
+            "ListingItem / PostItem",
             "ListingImage",
             "Reservation",
             "ChatMessage",

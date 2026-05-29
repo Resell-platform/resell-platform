@@ -103,9 +103,10 @@ export function createNoPaymentAdapter(target: PlatformTarget): PaymentAdapter {
 }
 
 export function buildListingSharePayload(listing: Listing, url: string): SharePayload {
+  const itemCount = `${listing.items.length} ${listing.items.length === 1 ? "item" : "items"}`;
   return {
     title: listing.title,
-    text: `${listing.title} - $${listing.price}`,
+    text: `${listing.title} - ${itemCount} - $${listing.price}`,
     url
   };
 }

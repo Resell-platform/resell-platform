@@ -59,18 +59,25 @@ describe("App user flows", () => {
     });
 
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Test lamp" } });
-    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: "64" } });
+    fireEvent.change(screen.getByLabelText(/post price/i), { target: { value: "64" } });
     fireEvent.change(screen.getByLabelText(/pickup or shipping notes/i), {
       target: { value: "Porch pickup" }
     });
     fireEvent.change(screen.getByLabelText(/description/i), {
       target: { value: "Brass desk lamp with working dimmer." }
     });
-    fireEvent.click(screen.getByRole("button", { name: /publish listing/i }));
+    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Brass desk lamp" } });
+    fireEvent.change(screen.getByLabelText(/item price 1/i), { target: { value: "64" } });
+    fireEvent.click(screen.getByRole("button", { name: /add item/i }));
+    fireEvent.change(screen.getByLabelText(/item name 2/i), { target: { value: "Bulb pack" } });
+    fireEvent.change(screen.getByLabelText(/item price 2/i), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /publish post/i }));
 
     expect(await screen.findAllByRole("heading", { name: "Test lamp" })).toHaveLength(2);
-    expect(screen.getAllByText("$64")).toHaveLength(2);
+    expect(screen.getAllByText("$64")).not.toHaveLength(0);
     expect(screen.getByText("Porch pickup")).toBeInTheDocument();
+    expect(screen.getAllByText("Brass desk lamp")).not.toHaveLength(0);
+    expect(screen.getAllByText("Bulb pack")).not.toHaveLength(0);
   });
 
   it("creates a chat message from the rendered composer and clears the input", () => {
@@ -92,7 +99,7 @@ describe("App user flows", () => {
     fireEvent.change(screen.getAllByLabelText(/demo user/i)[0], { target: { value: "buyer-2" } });
     fireEvent.click(screen.getByRole("button", { name: /chat/i }));
 
-    expect(screen.getByText(/reserve an item to start/i)).toBeInTheDocument();
+    expect(screen.getByText(/reserve a post to start/i)).toBeInTheDocument();
     expect(screen.queryByText(/i can pay today/i)).not.toBeInTheDocument();
   });
 
@@ -133,14 +140,15 @@ describe("App user flows", () => {
       expect(container.querySelectorAll(".upload-strip img")).toHaveLength(1);
     });
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Mobile floor lamp" } });
-    fireEvent.change(screen.getByLabelText(/price/i), { target: { value: "45" } });
+    fireEvent.change(screen.getByLabelText(/post price/i), { target: { value: "45" } });
     fireEvent.change(screen.getByLabelText(/pickup or shipping notes/i), {
       target: { value: "Lobby pickup" }
     });
     fireEvent.change(screen.getByLabelText(/description/i), {
       target: { value: "Slim lamp tested from a phone-sized layout." }
     });
-    fireEvent.click(screen.getByRole("button", { name: /publish listing/i }));
+    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Slim floor lamp" } });
+    fireEvent.click(screen.getByRole("button", { name: /publish post/i }));
 
     expect(await screen.findAllByRole("heading", { name: "Mobile floor lamp" })).not.toHaveLength(0);
 
@@ -300,9 +308,9 @@ describe("App user flows", () => {
     render(<App />);
 
     await screen.findAllByText("Cloudflare D1");
-    fireEvent.click(screen.getByRole("button", { name: /reserve item/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reserve post/i }));
 
-    expect(await screen.findAllByText(/log in with email to reserve this item/i)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/log in with email to reserve this post/i)).not.toHaveLength(0);
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/reservations",
       expect.objectContaining({ method: "POST" })
@@ -318,8 +326,8 @@ describe("App user flows", () => {
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
 
     expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
-    expect(screen.getAllByText(/log in with email to sell an item/i)).not.toHaveLength(0);
-    expect(screen.queryByRole("button", { name: /publish listing/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/log in with email to sell a post/i)).not.toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /publish post/i })).not.toBeInTheDocument();
   });
 
   it("prompts login immediately when a logged-out visitor clicks Chat", async () => {
@@ -475,6 +483,29 @@ describe("App user flows", () => {
     expect(createObjectURL).toHaveBeenCalled();
   });
 
+  it("includes reserved posts and their items in local buyer exports", async () => {
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:local-export");
+    const revokeObjectURL = vi.fn();
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL });
+
+    render(<App />);
+
+    fireEvent.change(screen.getAllByLabelText(/demo user/i)[0], { target: { value: "buyer-1" } });
+    fireEvent.click(screen.getAllByRole("button", { name: /export data/i })[0]);
+
+    await waitFor(() => {
+      expect(createObjectURL).toHaveBeenCalled();
+    });
+
+    const blob = createObjectURL.mock.calls[0][0] as Blob;
+    const exported = JSON.parse(await blob.text()) as { user: User; state: AppState };
+    expect(exported.user.id).toBe("buyer-1");
+    expect(exported.state.listings.map((listing) => listing.id)).toContain("listing-2");
+    expect(exported.state.listings.find((listing) => listing.id === "listing-2")?.items).toHaveLength(2);
+    expect(exported.state.listings.map((listing) => listing.id)).not.toContain("listing-1");
+  });
+
   it("does not fall back to local demo actions in production when the Cloudflare API fails", async () => {
     vi.stubEnv("DEV", false);
     vi.stubGlobal(
@@ -491,7 +522,7 @@ describe("App user flows", () => {
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
 
     expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /publish listing/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /publish post/i })).not.toBeInTheDocument();
   });
 });
 
@@ -506,7 +537,7 @@ function mockCloudflareSession(user: User | null, state: AppState = cloudflarePu
     }
     if (path.endsWith("/api/export")) {
       return jsonResponse({
-        formatVersion: 1,
+        formatVersion: 2,
         exportedAt: "2026-05-25T00:00:00.000Z",
         architecture: {
           backend: [],

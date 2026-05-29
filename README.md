@@ -1,6 +1,6 @@
 # Resell Platform
 
-MVP marketplace for listing items, reserving items, seller-buyer chat, image uploads, and manual payment follow-up notifications.
+MVP marketplace for seller posts with one or more items, reserving posts, seller-buyer chat, image uploads, and manual payment follow-up notifications.
 
 ## Local Development
 
@@ -36,12 +36,12 @@ npm run build
 
 ## Current MVP
 
-- Seller can publish listings with 1-6 uploaded images.
-- Buyers can browse listings, reserve an available item, and open a reservation-scoped chat with the seller.
+- Seller can publish posts with 1-6 uploaded images and one or more item rows.
+- Buyers can browse posts, reserve an available post, and open a reservation-scoped chat with the seller.
 - Cloudflare mode supports email-code account login, HttpOnly session cookies, editable profiles, and email/phone trust badge fields.
 - The H5/PWA web app supports English and Mandarin UI chrome for core marketplace workflows.
 - The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and explicit no-payment behavior.
-- Logged-in users can export their account, listings, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
+- Logged-in users can export their account, seller posts, post items, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
 - The app does not process payments. It tracks off-platform payment status only.
 - Payment is due 24 hours after reservation. The app creates one buyer notification and one seller notification when an unpaid reservation becomes overdue.
 - Plain local demo users can be switched from the left navigation on desktop. Cloudflare mode uses account login instead.

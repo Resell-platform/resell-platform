@@ -1,22 +1,24 @@
 import { seedState } from "./seed";
 import { createLocalStorageResource } from "../lib/storage";
-import type {
-  AccountActionError,
-  AccountActionResult,
-  AppState,
-  Listing,
-  ListingDraft,
-  ListingStatus,
-  LoginCredentials,
-  Message,
-  Notification,
-  ProfileDraft,
-  RegistrationDraft,
-  Reservation
+import {
+  MAX_LISTING_ITEMS,
+  type AccountActionError,
+  type AccountActionResult,
+  type AppState,
+  type Listing,
+  type ListingDraft,
+  type ListingItem,
+  type ListingStatus,
+  type LoginCredentials,
+  type Message,
+  type Notification,
+  type ProfileDraft,
+  type RegistrationDraft,
+  type Reservation
 } from "./types";
 
 const STORAGE_KEY = "resell-platform:v1";
-const STORAGE_VERSION = 2;
+const STORAGE_VERSION = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_PASSWORD_LENGTH = 8;
 const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
@@ -44,11 +46,11 @@ export function createId(prefix: string): string {
 }
 
 export function loadState(): AppState {
-  return normalizeAccountState(stateResource.load());
+  return normalizeAppState(stateResource.load());
 }
 
 export function saveState(state: AppState): void {
-  stateResource.save(normalizeAccountState(state));
+  stateResource.save(normalizeAppState(state));
 }
 
 export function resetState(): AppState {
@@ -60,6 +62,7 @@ export function getPrimaryImage(listing: Listing): string | undefined {
 }
 
 function isValidListingDraft(draft: ListingDraft): boolean {
+  const items = normalizeDraftItems(draft, "validation-listing", new Date().toISOString());
   return (
     draft.title.trim().length > 0 &&
     draft.description.trim().length > 0 &&
@@ -69,7 +72,9 @@ function isValidListingDraft(draft: ListingDraft): boolean {
     draft.price > 0 &&
     LISTING_CONDITIONS.has(draft.condition) &&
     draft.images.length >= 1 &&
-    draft.images.length <= 6
+    draft.images.length <= 6 &&
+    hasValidDraftItems(draft) &&
+    items.length > 0
   );
 }
 
@@ -147,7 +152,7 @@ export function registerAccount(state: AppState, draft: RegistrationDraft): Acco
     createdAt: now,
     updatedAt: now
   };
-  const nextState = normalizeAccountState({
+  const nextState = normalizeAppState({
     ...state,
     users: [...state.users, user],
     accounts: [account, ...(state.accounts ?? [])],
@@ -187,7 +192,7 @@ export function loginAccount(state: AppState, credentials: LoginCredentials): Ac
     lastLoginAt: now,
     updatedAt: now
   };
-  const nextState = normalizeAccountState({
+  const nextState = normalizeAppState({
     ...state,
     activeUserId: account.userId,
     activeAccountId: account.id,
@@ -231,7 +236,7 @@ export function updateUserProfile(state: AppState, userId: string, draft: Profil
   };
   const existingProfiles = state.profiles ?? [];
   const hasProfile = existingProfiles.some((item) => item.userId === userId);
-  const nextState = normalizeAccountState({
+  const nextState = normalizeAppState({
     ...state,
     users: state.users.map((item) => (item.id === userId ? { ...item, name: displayName } : item)),
     profiles: hasProfile
@@ -249,14 +254,18 @@ export function updateUserProfile(state: AppState, userId: string, draft: Profil
 }
 
 export function createListing(state: AppState, sellerId: string, draft: ListingDraft): AppState {
+  if (!isValidListingDraft(draft)) return state;
+
   const now = new Date().toISOString();
+  const listingId = createId("listing");
   const listing: Listing = {
     ...draft,
-    id: createId("listing"),
+    id: listingId,
     sellerId,
     status: "available",
     createdAt: now,
     updatedAt: now,
+    items: normalizeDraftItems(draft, listingId, now),
     images: draft.images.map((image, index) => ({
       ...image,
       primary: index === 0
@@ -322,6 +331,7 @@ export function updateListingDetails(
             condition: draft.condition,
             location: draft.location.trim(),
             updatedAt: now,
+            items: normalizeDraftItems(draft, listingId, now),
             images: draft.images.map((image, index) => ({
               ...image,
               primary: index === 0
@@ -521,13 +531,103 @@ export function getUserName(state: AppState, userId: string): string {
   return state.users.find((user) => user.id === userId)?.name ?? "Someone";
 }
 
-function normalizeAccountState(state: AppState): AppState {
+function normalizeAppState(state: AppState): AppState {
   const profiles = state.profiles ?? state.users.map(createProfileFromUser);
 
   return {
     ...state,
+    listings: state.listings.map(normalizeListing),
     accounts: state.accounts ?? [],
     profiles
+  };
+}
+
+function normalizeListing(listing: Listing): Listing {
+  return {
+    ...listing,
+    items: normalizeListingItems(listing)
+  };
+}
+
+function normalizeListingItems(listing: Listing): ListingItem[] {
+  const rawItems = Array.isArray(listing.items) ? listing.items : [];
+  const normalized = rawItems
+    .map((item, index) => normalizeListingItem(item, listing, index))
+    .filter((item): item is ListingItem => Boolean(item));
+
+  if (normalized.length > 0) return normalized;
+
+  return [
+    {
+      id: `${listing.id}-item-1`,
+      listingId: listing.id,
+      name: listing.title.trim() || "Item",
+      price: listing.price,
+      condition: listing.condition,
+      notes: listing.description.trim() || undefined,
+      position: 0,
+      createdAt: listing.createdAt
+    }
+  ];
+}
+
+function normalizeDraftItems(draft: ListingDraft, listingId: string, createdAt: string): ListingItem[] {
+  const draftListing: Listing = {
+    id: listingId,
+    sellerId: "",
+    title: draft.title,
+    description: draft.description,
+    price: draft.price,
+    category: draft.category,
+    condition: draft.condition,
+    location: draft.location,
+    images: draft.images,
+    items: Array.isArray(draft.items) ? draft.items : [],
+    status: "available",
+    createdAt,
+    updatedAt: createdAt
+  };
+  return normalizeListingItems(draftListing);
+}
+
+function draftItems(draft: ListingDraft): ListingItem[] {
+  return Array.isArray(draft.items) ? draft.items : [];
+}
+
+function hasItemContent(item: ListingItem): boolean {
+  return Boolean(
+    item.name?.trim() ||
+      item.notes?.trim() ||
+      (Number.isFinite(item.price) && Number(item.price) > 0) ||
+      item.condition
+  );
+}
+
+function hasValidDraftItems(draft: ListingDraft): boolean {
+  const items = draftItems(draft);
+  return (
+    items.length <= MAX_LISTING_ITEMS &&
+    items.every((item) => !hasItemContent(item) || Boolean(item.name?.trim()))
+  );
+}
+
+function normalizeListingItem(item: ListingItem, listing: Listing, index: number): ListingItem | undefined {
+  const name = item.name?.trim();
+  if (!name) return undefined;
+
+  const notes = item.notes?.trim();
+  const price = Number.isFinite(item.price) && Number(item.price) > 0 ? Number(item.price) : undefined;
+  const condition = item.condition && LISTING_CONDITIONS.has(item.condition) ? item.condition : undefined;
+
+  return {
+    id: item.id || createId("item"),
+    listingId: listing.id,
+    name,
+    price,
+    condition,
+    notes: notes || undefined,
+    position: index,
+    createdAt: item.createdAt || listing.createdAt
   };
 }
 
@@ -544,7 +644,7 @@ function createProfileFromUser(user: AppState["users"][number]) {
 }
 
 function migrateAppState(stored: unknown): AppState {
-  return isAppState(stored) ? normalizeAccountState(stored) : seedState;
+  return isAppState(stored) ? normalizeAppState(stored) : seedState;
 }
 
 function isAppState(value: unknown): value is AppState {

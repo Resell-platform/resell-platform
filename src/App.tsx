@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import {
   computeOverdueNotifications,
+  createId,
   createListing,
   getPrimaryImage,
   getUserName,
@@ -42,7 +43,18 @@ import {
   type ExportArchive,
   type RealtimeEvent
 } from "./data/remoteApi";
-import type { AppState, Listing, ListingDraft, ListingStatus, Message, Notification, Reservation, User } from "./data/types";
+import {
+  MAX_LISTING_ITEMS,
+  type AppState,
+  type Listing,
+  type ListingDraft,
+  type ListingItem,
+  type ListingStatus,
+  type Message,
+  type Notification,
+  type Reservation,
+  type User
+} from "./data/types";
 import { categoryLabel, copy, statusLabel, type Copy, type Locale } from "./i18n";
 import {
   buildListingSharePayload,
@@ -60,17 +72,29 @@ const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
   "overdue"
 ];
 
-const blankDraft: ListingDraft = {
-  title: "",
-  description: "",
-  price: 0,
-  category: "Furniture",
-  condition: "good",
-  location: "",
-  images: []
-};
-
 const platformAdapters = createWebPlatformAdapters();
+
+function createBlankDraftItem(position: number): ListingItem {
+  return {
+    id: createId("item"),
+    name: "",
+    position,
+    createdAt: new Date().toISOString()
+  };
+}
+
+function createBlankDraft(): ListingDraft {
+  return {
+    title: "",
+    description: "",
+    price: 0,
+    category: "Furniture",
+    condition: "good",
+    location: "",
+    images: [],
+    items: [createBlankDraftItem(0)]
+  };
+}
 
 function listingToDraft(listing: Listing): ListingDraft {
   return {
@@ -83,6 +107,10 @@ function listingToDraft(listing: Listing): ListingDraft {
     images: listing.images.map((image, index) => ({
       ...image,
       primary: index === 0
+    })),
+    items: listing.items.map((item, index) => ({
+      ...item,
+      position: index
     }))
   };
 }
@@ -102,8 +130,9 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
     (reservation) => reservation.buyerId === user.id || reservation.sellerId === user.id
   );
   const reservationIds = new Set(reservations.map((reservation) => reservation.id));
+  const reservedListingIds = new Set(reservations.map((reservation) => reservation.listingId));
   return {
-    formatVersion: 1,
+    formatVersion: 2,
     exportedAt: new Date().toISOString(),
     architecture: {
       backend: [
@@ -116,7 +145,8 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
       ],
       businessModels: [
         "User / Profile",
-        "Listing",
+        "Listing / Seller Post",
+        "ListingItem / PostItem",
         "ListingImage",
         "Reservation",
         "ChatMessage",
@@ -148,7 +178,9 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
     state: {
       ...state,
       activeUserId: user.id,
-      listings: state.listings.filter((listing) => listing.sellerId === user.id),
+      listings: state.listings.filter(
+        (listing) => listing.sellerId === user.id || reservedListingIds.has(listing.id)
+      ),
       reservations,
       messages: state.messages.filter((message) => reservationIds.has(message.reservationId)),
       notifications: state.notifications.filter((notification) => notification.userId === user.id)
@@ -215,6 +247,41 @@ function parseRealtimeEvent(data: unknown): RealtimeEvent | null {
   } catch {
     return null;
   }
+}
+
+function getItemCountText(listing: Listing, text: Copy) {
+  const count = listing.items.length;
+  return `${count} ${count === 1 ? text.itemSingular : text.itemPlural}`;
+}
+
+function formatOptionalPrice(price?: number) {
+  return Number.isFinite(price) ? `$${price}` : "";
+}
+
+function getListingItemSummary(listing: Listing) {
+  return listing.items
+    .slice()
+    .sort((first, second) => first.position - second.position)
+    .slice(0, 3);
+}
+
+function itemHasContent(item: ListingItem) {
+  return Boolean(
+    item.name.trim() ||
+      item.notes?.trim() ||
+      (Number.isFinite(item.price) && Number(item.price) > 0) ||
+      item.condition
+  );
+}
+
+function hasPublishableItems(draft: ListingDraft) {
+  const items = Array.isArray(draft.items) ? draft.items : [];
+  return (
+    items.length > 0 &&
+    items.length <= MAX_LISTING_ITEMS &&
+    items.some((item) => item.name.trim()) &&
+    items.every((item) => !itemHasContent(item) || Boolean(item.name.trim()))
+  );
 }
 
 export default function App() {
@@ -433,9 +500,13 @@ export default function App() {
     const normalized = query.toLowerCase().trim();
     return state.listings.filter((listing) => {
       if (!normalized) return true;
-      return [listing.title, listing.category, listing.description, listing.location].some((field) =>
-        field.toLowerCase().includes(normalized)
-      );
+      return [
+        listing.title,
+        listing.category,
+        listing.description,
+        listing.location,
+        ...listing.items.flatMap((item) => [item.name, item.notes ?? ""])
+      ].some((field) => field.toLowerCase().includes(normalized));
     });
   }, [query, state.listings]);
   const userReservations = activeUser
@@ -1146,6 +1217,12 @@ function BrowseView({
                 <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
                 <h2>{listing.title}</h2>
                 <p>${listing.price}</p>
+                <span className="item-count">{getItemCountText(listing, text)}</span>
+                <ul className="item-summary">
+                  {getListingItemSummary(listing).map((item) => (
+                    <li key={item.id}>{item.name}</li>
+                  ))}
+                </ul>
               </div>
             </button>
           ))}
@@ -1160,6 +1237,26 @@ function BrowseView({
             <h2>{selectedListing.title}</h2>
             <p className="price">${selectedListing.price}</p>
             <p>{selectedListing.description}</p>
+            <section className="detail-items">
+              <div className="subsection-header">
+                <div>
+                  <span>{text.postItems}</span>
+                  <p>{getItemCountText(selectedListing, text)}</p>
+                </div>
+              </div>
+              {selectedListing.items.map((item) => (
+                <article className="detail-item" key={item.id}>
+                  <div>
+                    <strong>{item.name}</strong>
+                    {item.notes && <p>{item.notes}</p>}
+                  </div>
+                  <div className="detail-item-meta">
+                    {formatOptionalPrice(item.price) && <span>{formatOptionalPrice(item.price)}</span>}
+                    {item.condition && <span>{statusLabel(item.condition, locale)}</span>}
+                  </div>
+                </article>
+              ))}
+            </section>
             <dl>
               <div>
                 <dt>{text.condition}</dt>
@@ -1206,6 +1303,128 @@ function ListingGallery({ listing }: { listing: Listing }) {
   );
 }
 
+function ListingItemFields({
+  draft,
+  onChange,
+  text,
+  locale,
+  ariaPrefix
+}: {
+  draft: ListingDraft;
+  onChange: (draft: ListingDraft) => void;
+  text: Copy;
+  locale: Locale;
+  ariaPrefix?: string;
+}) {
+  const items = draft.items.length > 0 ? draft.items : [createBlankDraftItem(0)];
+  const canAddItem = items.length < MAX_LISTING_ITEMS;
+
+  function reindex(nextItems: ListingItem[]) {
+    return nextItems.map((item, index) => ({ ...item, position: index }));
+  }
+
+  function updateItem(itemId: string, patch: Partial<ListingItem>) {
+    onChange({
+      ...draft,
+      items: reindex(items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)))
+    });
+  }
+
+  function addItem() {
+    if (!canAddItem) return;
+    onChange({
+      ...draft,
+      items: reindex([...items, createBlankDraftItem(items.length)])
+    });
+  }
+
+  function removeItem(itemId: string) {
+    const remaining = items.filter((item) => item.id !== itemId);
+    onChange({
+      ...draft,
+      items: reindex(remaining.length > 0 ? remaining : [createBlankDraftItem(0)])
+    });
+  }
+
+  return (
+    <section className="item-fields">
+      <div className="subsection-header">
+        <div>
+          <span>{text.postItems}</span>
+          <p>{text.postItemsHelp}</p>
+        </div>
+        <button type="button" className="secondary" onClick={addItem} disabled={!canAddItem}>
+          <Package size={16} />
+          {text.addItem}
+        </button>
+      </div>
+      {items.map((item, index) => (
+        <div className="item-row" key={item.id}>
+          <div className="item-row-heading">
+            <strong>
+              {text.itemSingular} {index + 1}
+            </strong>
+            <button type="button" className="ghost-inline" onClick={() => removeItem(item.id)}>
+              {text.removeItem}
+            </button>
+          </div>
+          <div className="field-grid">
+            <label>
+              <span>{text.itemName}</span>
+              <input
+                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemName} ${index + 1}`}
+                value={item.name}
+                onChange={(event) => updateItem(item.id, { name: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{text.itemPrice}</span>
+              <input
+                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemPrice} ${index + 1}`}
+                type="number"
+                min="1"
+                value={item.price ?? ""}
+                onChange={(event) =>
+                  updateItem(item.id, {
+                    price: event.target.value ? Number(event.target.value) : undefined
+                  })
+                }
+              />
+            </label>
+            <label>
+              <span>{text.itemCondition}</span>
+              <select
+                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemCondition} ${index + 1}`}
+                value={item.condition ?? ""}
+                onChange={(event) =>
+                  updateItem(item.id, {
+                    condition: event.target.value ? (event.target.value as ListingDraft["condition"]) : undefined
+                  })
+                }
+              >
+                <option value="">{text.sameAsPost}</option>
+                {["new", "like_new", "good", "fair"].map((condition) => (
+                  <option key={condition} value={condition}>
+                    {statusLabel(condition, locale)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>{text.itemNotes}</span>
+              <input
+                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemNotes} ${index + 1}`}
+                value={item.notes ?? ""}
+                onChange={(event) => updateItem(item.id, { notes: event.target.value })}
+              />
+            </label>
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
+
 function SellView({
   activeUser,
   onCreate,
@@ -1235,7 +1454,7 @@ function SellView({
   text: Copy;
   locale: Locale;
 }) {
-  const [draft, setDraft] = useState<ListingDraft>(blankDraft);
+  const [draft, setDraft] = useState<ListingDraft>(createBlankDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ListingDraft | null>(null);
   const [uploadError, setUploadError] = useState("");
@@ -1243,7 +1462,12 @@ function SellView({
   const [editError, setEditError] = useState("");
   const sellerListings = activeUser ? listings.filter((listing) => listing.sellerId === activeUser.id) : [];
   const canPublish =
-    draft.title.trim() && draft.description.trim() && draft.price > 0 && draft.location.trim() && draft.images.length > 0;
+    draft.title.trim() &&
+    draft.description.trim() &&
+    draft.price > 0 &&
+    draft.location.trim() &&
+    draft.images.length > 0 &&
+    hasPublishableItems(draft);
   const editingListing = sellerListings.find((listing) => listing.id === editingId);
   const canSaveEdit = Boolean(
     editDraft &&
@@ -1256,7 +1480,8 @@ function SellView({
     editDraft.price > 0 &&
     editDraft.location.trim() &&
     editDraft.images.length > 0 &&
-    editDraft.images.length <= 6
+    editDraft.images.length <= 6 &&
+    hasPublishableItems(editDraft)
   );
 
   async function handleFiles(files: FileList | null) {
@@ -1322,7 +1547,7 @@ function SellView({
           if (!canPublish) return;
           const created = await onCreate(draft);
           if (created) {
-            setDraft(blankDraft);
+            setDraft(createBlankDraft());
           }
         }}
       >
@@ -1410,6 +1635,7 @@ function SellView({
             rows={5}
           />
         </label>
+        <ListingItemFields draft={draft} onChange={setDraft} text={text} locale={locale} />
         <button className="primary" disabled={!canPublish}>
           <Package size={18} />
           {text.publishListing}
@@ -1433,7 +1659,8 @@ function SellView({
               <div>
                 <strong>{listing.title}</strong>
                 <p className="muted">
-                  ${listing.price} · {text.updated} {new Date(listing.updatedAt).toLocaleDateString()}
+                  ${listing.price} · {getItemCountText(listing, text)} · {text.updated}{" "}
+                  {new Date(listing.updatedAt).toLocaleDateString()}
                 </p>
                 <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
                 {activeReservation && (
@@ -1613,6 +1840,13 @@ function SellView({
                       rows={4}
                     />
                   </label>
+                  <ListingItemFields
+                    draft={editDraft}
+                    onChange={setEditDraft}
+                    text={text}
+                    locale={locale}
+                    ariaPrefix={`Edit ${listing.title}`}
+                  />
                   {editError && <p className="form-error">{editError}</p>}
                   <div className="button-row">
                     <button className="primary" disabled={!canSaveEdit}>
@@ -1685,6 +1919,7 @@ function OrdersView({
                 <div>
                   <span className={`badge ${reservation.status}`}>{statusLabel(reservation.status, locale)}</span>
                   <h2>{listing?.title ?? text.deletedListing}</h2>
+                  {listing && <p className="muted">{getItemCountText(listing, text)}</p>}
                   <p>{text.due} {new Date(reservation.paymentDueAt).toLocaleString()}</p>
                   <p className="muted">
                     {text.buyer} {getUserName(state, reservation.buyerId)} · {text.seller} {getUserName(state, reservation.sellerId)}
@@ -1761,6 +1996,7 @@ function ChatView({
             >
               <img src={item ? getPrimaryImage(item) : undefined} alt="" />
               <span>{item?.title ?? text.deletedListing}</span>
+              {item && <small>{getItemCountText(item, text)}</small>}
             </button>
           );
         })}
@@ -1774,7 +2010,7 @@ function ChatView({
                 <h1>{listing.title}</h1>
                 <p>
                   {getUserName(state, selectedReservation.buyerId)} {text.participantAnd}{" "}
-                  {getUserName(state, selectedReservation.sellerId)}
+                  {getUserName(state, selectedReservation.sellerId)} · {getItemCountText(listing, text)}
                 </p>
               </div>
               <span className={`badge ${selectedReservation.status}`}>{statusLabel(selectedReservation.status, locale)}</span>

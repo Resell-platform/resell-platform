@@ -22,7 +22,7 @@ describe("platform adapters", () => {
 
     expect(buildListingSharePayload(listing, "https://example.com/?listing=listing-1")).toEqual({
       title: listing.title,
-      text: `${listing.title} - $${listing.price}`,
+      text: `${listing.title} - 1 item - $${listing.price}`,
       url: "https://example.com/?listing=listing-1"
     });
   });

@@ -359,6 +359,21 @@ h2 {
   color: #176b5b;
 }
 
+.item-count {
+  display: inline-block;
+  margin-top: 2px;
+  color: #65727c;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.item-summary {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #65727c;
+  font-size: 0.84rem;
+}
+
 .badge {
   display: inline-flex;
   width: fit-content;
@@ -432,6 +447,59 @@ h2 {
 
 .detail-copy {
   margin-top: 16px;
+}
+
+.detail-items,
+.item-fields {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0;
+}
+
+.subsection-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subsection-header span {
+  color: #172026;
+  font-size: 0.92rem;
+  font-weight: 900;
+}
+
+.subsection-header p {
+  margin: 2px 0 0;
+  color: #65727c;
+  font-size: 0.84rem;
+}
+
+.detail-item,
+.item-row {
+  border: 1px solid #dfe5e0;
+  border-radius: 8px;
+  background: #f8faf7;
+  padding: 12px;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.detail-item p {
+  margin: 4px 0 0;
+  color: #65727c;
+}
+
+.detail-item-meta {
+  display: grid;
+  gap: 4px;
+  color: #176b5b;
+  font-weight: 900;
+  text-align: right;
 }
 
 dl {
@@ -571,9 +639,42 @@ label {
   padding-top: 12px;
 }
 
+.item-fields {
+  margin: 4px 0;
+}
+
+.item-row {
+  display: grid;
+  gap: 10px;
+}
+
+.item-row-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ghost-inline {
+  border: 0;
+  background: transparent;
+  color: #65727c;
+  font-weight: 900;
+  padding: 4px 0;
+}
+
+.item-line {
+  margin-bottom: 8px;
+}
+
 .thread {
   width: 100%;
   text-align: left;
+}
+
+.thread small {
+  color: #65727c;
+  font-weight: 800;
 }
 
 .active-thread {
