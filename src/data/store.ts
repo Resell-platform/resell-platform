@@ -6,6 +6,7 @@ import {
   type AccountActionResult,
   type AppState,
   type Listing,
+  type ListingCondition,
   type ListingDraft,
   type ListingItem,
   type ListingStatus,
@@ -68,9 +69,6 @@ function isValidListingDraft(draft: ListingDraft): boolean {
     draft.description.trim().length > 0 &&
     draft.location.trim().length > 0 &&
     draft.category.trim().length > 0 &&
-    Number.isFinite(draft.price) &&
-    draft.price > 0 &&
-    LISTING_CONDITIONS.has(draft.condition) &&
     draft.images.length >= 1 &&
     draft.images.length <= 6 &&
     hasValidDraftItems(draft) &&
@@ -258,14 +256,17 @@ export function createListing(state: AppState, sellerId: string, draft: ListingD
 
   const now = new Date().toISOString();
   const listingId = createId("listing");
+  const items = normalizeDraftItems(draft, listingId, now);
   const listing: Listing = {
     ...draft,
     id: listingId,
     sellerId,
+    price: getListingTotalPrice(items),
+    condition: getListingSummaryCondition(items),
     status: "available",
     createdAt: now,
     updatedAt: now,
-    items: normalizeDraftItems(draft, listingId, now),
+    items,
     images: draft.images.map((image, index) => ({
       ...image,
       primary: index === 0
@@ -318,6 +319,7 @@ export function updateListingDetails(
   if (!isValidListingDraft(draft)) return state;
 
   const now = new Date().toISOString();
+  const items = normalizeDraftItems(draft, listingId, now);
   return {
     ...state,
     listings: state.listings.map((item) =>
@@ -326,12 +328,12 @@ export function updateListingDetails(
             ...item,
             title: draft.title.trim(),
             description: draft.description.trim(),
-            price: draft.price,
+            price: getListingTotalPrice(items),
             category: draft.category.trim(),
-            condition: draft.condition,
+            condition: getListingSummaryCondition(items),
             location: draft.location.trim(),
             updatedAt: now,
-            items: normalizeDraftItems(draft, listingId, now),
+            items,
             images: draft.images.map((image, index) => ({
               ...image,
               primary: index === 0
@@ -594,23 +596,19 @@ function draftItems(draft: ListingDraft): ListingItem[] {
   return Array.isArray(draft.items) ? draft.items : [];
 }
 
-function hasItemContent(item: ListingItem): boolean {
-  return Boolean(
-    item.name?.trim() ||
-      item.notes?.trim() ||
-      (Number.isFinite(item.price) && Number(item.price) > 0) ||
-      item.condition
-  );
-}
-
 function hasValidDraftItems(draft: ListingDraft): boolean {
   const items = draftItems(draft);
-  if (items.length === 0) return true;
 
   return (
+    items.length > 0 &&
     items.length <= MAX_LISTING_ITEMS &&
-    items.some((item) => item.name?.trim()) &&
-    items.every((item) => !hasItemContent(item) || Boolean(item.name?.trim()))
+    items.every(
+      (item) =>
+        Boolean(item.name?.trim()) &&
+        Number.isFinite(item.price) &&
+        Number(item.price) > 0 &&
+        Boolean(item.condition && LISTING_CONDITIONS.has(item.condition))
+    )
   );
 }
 
@@ -632,6 +630,24 @@ function normalizeListingItem(item: ListingItem, listing: Listing, index: number
     position: index,
     createdAt: item.createdAt || listing.createdAt
   };
+}
+
+const CONDITION_RANK: Record<ListingCondition, number> = {
+  fair: 0,
+  good: 1,
+  like_new: 2,
+  new: 3
+};
+
+function getListingTotalPrice(items: ListingItem[]): number {
+  return items.reduce((total, item) => total + (Number.isFinite(item.price) ? Number(item.price) : 0), 0);
+}
+
+function getListingSummaryCondition(items: ListingItem[]): ListingCondition {
+  return items.reduce<ListingCondition>((summary, item) => {
+    if (!item.condition) return summary;
+    return CONDITION_RANK[item.condition] < CONDITION_RANK[summary] ? item.condition : summary;
+  }, "new");
 }
 
 function createProfileFromUser(user: AppState["users"][number]) {

@@ -77,10 +77,11 @@ const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
 
 const platformAdapters = createWebPlatformAdapters();
 
-function createBlankDraftItem(position: number): ListingItem {
+function createBlankDraftItem(position: number, condition: ListingItem["condition"] = "good"): ListingItem {
   return {
     id: createId("item"),
     name: "",
+    condition,
     position,
     createdAt: new Date().toISOString()
   };
@@ -95,7 +96,7 @@ function createBlankDraft(): ListingDraft {
     condition: "good",
     location: "",
     images: [],
-    items: []
+    items: [createBlankDraftItem(0)]
   };
 }
 
@@ -111,12 +112,14 @@ function listingToDraft(listing: Listing): ListingDraft {
       ...image,
       primary: index === 0
     })),
-    items: isDefaultDerivedListingItem(listing)
-      ? []
-      : listing.items.map((item, index) => ({
-          ...item,
-          position: index
-        }))
+    items:
+      listing.items.length > 0
+        ? listing.items.map((item, index) => ({
+            ...item,
+            condition: item.condition ?? listing.condition,
+            position: index
+          }))
+        : [createBlankDraftItem(0, listing.condition)]
   };
 }
 
@@ -255,8 +258,6 @@ function parseRealtimeEvent(data: unknown): RealtimeEvent | null {
 }
 
 function getItemCountText(listing: Listing, text: Copy) {
-  if (isDefaultDerivedListingItem(listing)) return "";
-
   const count = listing.items.length;
   return `${count} ${count === 1 ? text.itemSingular : text.itemPlural}`;
 }
@@ -280,9 +281,14 @@ function formatOptionalPrice(price?: number) {
   return Number.isFinite(price) ? `$${price}` : "";
 }
 
-function getListingItemSummary(listing: Listing) {
-  if (isDefaultDerivedListingItem(listing)) return [];
+function getDraftItemTotal(draft: ListingDraft) {
+  return (Array.isArray(draft.items) ? draft.items : []).reduce(
+    (total, item) => total + (Number.isFinite(item.price) ? Number(item.price) : 0),
+    0
+  );
+}
 
+function getListingItemSummary(listing: Listing) {
   return listing.items
     .slice()
     .sort((first, second) => first.position - second.position)
@@ -290,40 +296,22 @@ function getListingItemSummary(listing: Listing) {
 }
 
 function getListingDisplayItems(listing: Listing) {
-  if (isDefaultDerivedListingItem(listing)) return [];
-
   return listing.items.slice().sort((first, second) => first.position - second.position);
-}
-
-function isDefaultDerivedListingItem(listing: Listing) {
-  if (listing.items.length !== 1) return false;
-
-  const [item] = listing.items;
-  return (
-    item.name === listing.title.trim() &&
-    item.price === listing.price &&
-    item.condition === listing.condition &&
-    (item.notes ?? "") === listing.description.trim()
-  );
-}
-
-function itemHasContent(item: ListingItem) {
-  return Boolean(
-    item.name.trim() ||
-      item.notes?.trim() ||
-      (Number.isFinite(item.price) && Number(item.price) > 0) ||
-      item.condition
-  );
 }
 
 function hasPublishableItems(draft: ListingDraft) {
   const items = Array.isArray(draft.items) ? draft.items : [];
-  if (items.length === 0) return true;
 
   return (
+    items.length > 0 &&
     items.length <= MAX_LISTING_ITEMS &&
-    items.some((item) => item.name.trim()) &&
-    items.every((item) => !itemHasContent(item) || Boolean(item.name.trim()))
+    items.every(
+      (item) =>
+        item.name.trim() &&
+        Number.isFinite(item.price) &&
+        Number(item.price) > 0 &&
+        item.condition
+    )
   );
 }
 
@@ -1349,10 +1337,6 @@ function BrowseView({
             })()}
             <dl>
               <div>
-                <dt>{text.condition}</dt>
-                <dd>{statusLabel(selectedListing.condition, locale)}</dd>
-              </div>
-              <div>
                 <dt>{text.category}</dt>
                 <dd>{categoryLabel(selectedListing.category, locale)}</dd>
               </div>
@@ -1413,27 +1397,27 @@ function ListingItemFields({
     return nextItems.map((item, index) => ({ ...item, position: index }));
   }
 
-  function updateItem(itemId: string, patch: Partial<ListingItem>) {
-    onChange({
+  function syncDraftItems(nextItems: ListingItem[]) {
+    const reindexedItems = reindex(nextItems);
+    return {
       ...draft,
-      items: reindex(items.map((item) => (item.id === itemId ? { ...item, ...patch } : item)))
-    });
+      condition: reindexedItems[0]?.condition ?? draft.condition,
+      items: reindexedItems
+    };
+  }
+
+  function updateItem(itemId: string, patch: Partial<ListingItem>) {
+    onChange(syncDraftItems(items.map((item) => (item.id === itemId ? { ...item, ...patch } : item))));
   }
 
   function addItem() {
     if (!canAddItem) return;
-    onChange({
-      ...draft,
-      items: reindex([...items, createBlankDraftItem(items.length)])
-    });
+    onChange(syncDraftItems([...items, createBlankDraftItem(items.length, draft.condition)]));
   }
 
   function removeItem(itemId: string) {
     const remaining = items.filter((item) => item.id !== itemId);
-    onChange({
-      ...draft,
-      items: reindex(remaining)
-    });
+    onChange(syncDraftItems(remaining));
   }
 
   return (
@@ -1442,6 +1426,9 @@ function ListingItemFields({
         <div>
           <span>{text.postItems}</span>
           <p>{text.postItemsHelp}</p>
+          <p className="item-total">
+            {text.listingTotal}: ${getDraftItemTotal(draft)}
+          </p>
         </div>
         <button type="button" className="secondary" onClick={addItem} disabled={!canAddItem}>
           <Package size={16} />
@@ -1454,7 +1441,12 @@ function ListingItemFields({
             <strong>
               {text.itemSingular} {index + 1}
             </strong>
-            <button type="button" className="ghost-inline" onClick={() => removeItem(item.id)}>
+            <button
+              type="button"
+              className="ghost-inline"
+              onClick={() => removeItem(item.id)}
+              disabled={items.length <= 1}
+            >
               {text.removeItem}
             </button>
           </div>
@@ -1488,11 +1480,10 @@ function ListingItemFields({
                 value={item.condition ?? ""}
                 onChange={(event) =>
                   updateItem(item.id, {
-                    condition: event.target.value ? (event.target.value as ListingDraft["condition"]) : undefined
+                    condition: event.target.value as ListingDraft["condition"]
                   })
                 }
               >
-                <option value="">{text.sameAsPost}</option>
                 {["new", "like_new", "good", "fair"].map((condition) => (
                   <option key={condition} value={condition}>
                     {statusLabel(condition, locale)}
@@ -1554,7 +1545,6 @@ function SellView({
   const canPublish =
     draft.title.trim() &&
     draft.description.trim() &&
-    draft.price > 0 &&
     draft.location.trim() &&
     draft.images.length > 0 &&
     hasPublishableItems(draft);
@@ -1567,7 +1557,6 @@ function SellView({
     editDraft.title.trim() &&
     editDraft.description.trim() &&
     editDraft.category.trim() &&
-    editDraft.price > 0 &&
     editDraft.location.trim() &&
     editDraft.images.length > 0 &&
     editDraft.images.length <= 6 &&
@@ -1681,33 +1670,11 @@ function SellView({
             <input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
           </label>
           <label>
-            <span>{text.price}</span>
-            <input
-              type="number"
-              min="1"
-              value={draft.price || ""}
-              onChange={(event) => setDraft({ ...draft, price: Number(event.target.value) })}
-            />
-          </label>
-          <label>
             <span>{text.category}</span>
             <select value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })}>
               {["Furniture", "Electronics", "Clothing", "Home", "Outdoor"].map((category) => (
                 <option key={category} value={category}>
                   {categoryLabel(category, locale)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>{text.overallCondition}</span>
-            <select
-              value={draft.condition}
-              onChange={(event) => setDraft({ ...draft, condition: event.target.value as ListingDraft["condition"] })}
-            >
-              {["new", "like_new", "good", "fair"].map((condition) => (
-                <option key={condition} value={condition}>
-                  {statusLabel(condition, locale)}
                 </option>
               ))}
             </select>
@@ -1870,16 +1837,6 @@ function SellView({
                       />
                     </label>
                     <label>
-                      <span>{text.price}</span>
-                      <input
-                        aria-label={`Edit price for ${listing.title}`}
-                        type="number"
-                        min="1"
-                        value={editDraft.price || ""}
-                        onChange={(event) => setEditDraft({ ...editDraft, price: Number(event.target.value) })}
-                      />
-                    </label>
-                    <label>
                       <span>{text.category}</span>
                       <select
                         aria-label={`Edit category for ${listing.title}`}
@@ -1889,22 +1846,6 @@ function SellView({
                         {["Furniture", "Electronics", "Clothing", "Home", "Outdoor"].map((category) => (
                           <option key={category} value={category}>
                             {categoryLabel(category, locale)}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label>
-                      <span>{text.overallCondition}</span>
-                      <select
-                        aria-label={`Edit condition for ${listing.title}`}
-                        value={editDraft.condition}
-                        onChange={(event) =>
-                          setEditDraft({ ...editDraft, condition: event.target.value as ListingDraft["condition"] })
-                        }
-                      >
-                        {["new", "like_new", "good", "fair"].map((condition) => (
-                          <option key={condition} value={condition}>
-                            {statusLabel(condition, locale)}
                           </option>
                         ))}
                       </select>
