@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
+  ChevronLeft,
+  ChevronRight,
   CheckCircle2,
   Download,
   ImagePlus,
+  Menu,
   MessageSquare,
   Package,
   RefreshCcw,
@@ -337,6 +340,8 @@ export default function App() {
   const [actionError, setActionError] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [view, setView] = useState<View>("browse");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileNavVisible, setMobileNavVisible] = useState(true);
   const [selectedListingId, setSelectedListingId] = useState<string | null>("listing-1");
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>("reservation-1");
   const [query, setQuery] = useState("");
@@ -737,11 +742,21 @@ export default function App() {
   }
 
   return (
-    <div className="app">
-      <aside className="sidebar" aria-label="Primary navigation">
-        <div className="brand">
-          <img className="brand-mark" src="/brand/icon-192.png" alt="" />
-          <span>Resell</span>
+    <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavVisible ? "" : "mobile-nav-hidden"}`}>
+      <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"} aria-label="Primary navigation">
+        <div className="sidebar-header">
+          <div className="brand">
+            <img className="brand-mark" src="/brand/icon-192.png" alt="" />
+            <span>Resell</span>
+          </div>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            aria-label={sidebarCollapsed ? text.expandSidebar : text.collapseSidebar}
+            onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}
+          >
+            {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          </button>
         </div>
         <LanguageControl locale={locale} setLocale={setLocale} text={text} />
         <div className="data-source">{dataSource === "cloudflare" ? "Cloudflare D1" : text.localDemo}</div>
@@ -819,6 +834,15 @@ export default function App() {
             <img className="brand-mark" src="/brand/icon-192.png" alt="" />
             <span>Resell</span>
           </div>
+          <button
+            className="mobile-nav-toggle secondary"
+            type="button"
+            aria-label={mobileNavVisible ? text.hideNavigation : text.showNavigation}
+            onClick={() => setMobileNavVisible((visible) => !visible)}
+          >
+            <Menu size={18} />
+            <span>{mobileNavVisible ? text.hideNavigation : text.showNavigation}</span>
+          </button>
           <div className="data-source">{dataSource === "cloudflare" ? "Cloudflare D1" : text.localDemo}</div>
         </header>
         <div className="mobile-user-bar">
@@ -1086,12 +1110,14 @@ function AccountPanel({
   const [profileName, setProfileName] = useState(user?.name ?? "");
   const [pickupArea, setPickupArea] = useState(user?.pickupArea ?? "");
   const [bio, setBio] = useState(user?.bio ?? "");
+  const [profileOpen, setProfileOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
     setProfileName(user?.name ?? "");
     setPickupArea(user?.pickupArea ?? "");
     setBio(user?.bio ?? "");
+    setProfileOpen(false);
   }, [user]);
 
   async function requestCode() {
@@ -1173,38 +1199,48 @@ function AccountPanel({
   }
 
   return (
-    <section className="account-panel">
-      <div className="account-heading">
-        <UserRound size={18} />
-        <strong>{user.name}</strong>
-      </div>
-      <div className="trust-row">
-        <span className="trust-badge">{text.emailVerified}</span>
-        <span className="trust-badge muted-badge">{user.phoneVerifiedAt ? text.phoneVerified : text.noPhoneBadge}</span>
+    <section className="account-panel signed-in">
+      <div className="account-summary">
+        <div className="account-heading">
+          <UserRound size={18} />
+          <div>
+            <strong>{user.name}</strong>
+            <span>{text.emailVerified}</span>
+          </div>
+        </div>
+        <button className="ghost-inline" type="button" onClick={() => setProfileOpen((open) => !open)}>
+          {profileOpen ? text.collapseProfile : text.editProfile}
+        </button>
       </div>
       {message && <p className="account-message">{message}</p>}
-      <label>
-        <span>{text.displayName}</span>
-        <input value={profileName} onChange={(event) => setProfileName(event.target.value)} />
-      </label>
-      <label>
-        <span>{text.pickupArea}</span>
-        <input value={pickupArea} onChange={(event) => setPickupArea(event.target.value)} />
-      </label>
-      <label>
-        <span>{text.bio}</span>
-        <textarea rows={3} value={bio} onChange={(event) => setBio(event.target.value)} />
-      </label>
-      <button className="secondary" disabled={pending || !profileName.trim()} onClick={saveProfile}>
-        {text.saveProfile}
-      </button>
-      <button className="secondary" disabled={pending} onClick={onExport}>
-        <Download size={16} />
-        {text.dataExport}
-      </button>
-      <button className="ghost account-logout" disabled={pending} onClick={onLogout}>
-        {text.logOut}
-      </button>
+      {profileOpen && (
+        <div className="account-profile">
+          <label>
+            <span>{text.displayName}</span>
+            <input value={profileName} onChange={(event) => setProfileName(event.target.value)} />
+          </label>
+          <label>
+            <span>{text.pickupArea}</span>
+            <input value={pickupArea} onChange={(event) => setPickupArea(event.target.value)} />
+          </label>
+          <label>
+            <span>{text.bio}</span>
+            <textarea rows={3} value={bio} onChange={(event) => setBio(event.target.value)} />
+          </label>
+          <button className="secondary" disabled={pending || !profileName.trim()} onClick={saveProfile}>
+            {text.saveProfile}
+          </button>
+        </div>
+      )}
+      <div className="account-actions">
+        <button className="secondary" disabled={pending} onClick={onExport}>
+          <Download size={16} />
+          {text.dataExport}
+        </button>
+        <button className="ghost account-logout" disabled={pending} onClick={onLogout}>
+          {text.logOut}
+        </button>
+      </div>
     </section>
   );
 }
