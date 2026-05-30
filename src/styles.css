@@ -568,6 +568,11 @@ h2 {
   font-size: 0.84rem;
 }
 
+.subsection-header .item-total {
+  color: #172026;
+  font-weight: 900;
+}
+
 .detail-item,
 .item-row {
   border: 1px solid #dfe5e0;
@@ -754,6 +759,11 @@ label {
   color: #65727c;
   font-weight: 900;
   padding: 4px 0;
+}
+
+.ghost-inline:disabled {
+  color: #a8b0b5;
+  cursor: not-allowed;
 }
 
 .item-line {

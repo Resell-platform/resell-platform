@@ -98,15 +98,19 @@ describe("Cloudflare listing persistence", () => {
     );
 
     const itemStatements = statements.filter((statement) => statement.sql.includes("INSERT INTO listing_items"));
+    const listingStatement = statements.find((statement) => statement.sql.includes("INSERT INTO listings"));
     expect(batch).toHaveBeenCalledTimes(1);
+    expect(listingStatement?.args.slice(4, 7)).toEqual([95, "Home", "good"]);
     expect(itemStatements).toHaveLength(2);
     expect(itemStatements[0].args.slice(2, 7)).toEqual(["Saucepan", 35, "good", "Stainless steel", 0]);
     expect(itemStatements[1].args.slice(2, 7)).toEqual(["Knife block", 60, "like_new", "Five knives", 1]);
   });
 
-  it("rejects partial item rows and posts over the item limit", async () => {
+  it("rejects missing, partial, and oversized item sets", async () => {
     const partial = createEnv();
     const blank = createEnv();
+    const missingPrice = createEnv();
+    const noItems = createEnv();
     const tooMany = createEnv();
 
     await expect(
@@ -118,12 +122,13 @@ describe("Cloudflare listing persistence", () => {
             id: "item-partial",
             name: "",
             price: 25,
+            condition: "good",
             position: 0,
             createdAt: "2026-05-23T10:00:00.000Z"
           }
         ])
       )
-    ).rejects.toThrow("Every post item with details must include a name.");
+    ).rejects.toThrow("Every listing item must include a name.");
     await expect(
       createListingInDb(
         blank.env,
@@ -137,7 +142,25 @@ describe("Cloudflare listing persistence", () => {
           }
         ])
       )
-    ).rejects.toThrow("Customized post items must include at least one item name.");
+    ).rejects.toThrow("Every listing item must include a name.");
+    await expect(
+      createListingInDb(
+        missingPrice.env,
+        "seller-1",
+        createDraft([
+          {
+            id: "item-missing-price",
+            name: "Saucepan",
+            condition: "good",
+            position: 0,
+            createdAt: "2026-05-23T10:00:00.000Z"
+          }
+        ])
+      )
+    ).rejects.toThrow("Every listing item must include a price.");
+    await expect(createListingInDb(noItems.env, "seller-1", createDraft([]))).rejects.toThrow(
+      "Listings must include at least one item."
+    );
     await expect(
       createListingInDb(
         tooMany.env,
@@ -147,14 +170,17 @@ describe("Cloudflare listing persistence", () => {
             id: `item-${index}`,
             name: `Item ${index + 1}`,
             price: 10 + index,
+            condition: "good" as const,
             position: index,
             createdAt: "2026-05-23T10:00:00.000Z"
           }))
         )
       )
-    ).rejects.toThrow(`Posts must include no more than ${MAX_LISTING_ITEMS} items.`);
+    ).rejects.toThrow(`Listings must include no more than ${MAX_LISTING_ITEMS} items.`);
     expect(partial.batch).not.toHaveBeenCalled();
     expect(blank.batch).not.toHaveBeenCalled();
+    expect(missingPrice.batch).not.toHaveBeenCalled();
+    expect(noItems.batch).not.toHaveBeenCalled();
     expect(tooMany.batch).not.toHaveBeenCalled();
   });
 });

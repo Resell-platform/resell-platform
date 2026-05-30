@@ -161,6 +161,8 @@ describe("store state transitions", () => {
     const listing = next.listings[0];
 
     expect(listing.title).toBe("Road bike");
+    expect(listing.price).toBe(455);
+    expect(listing.condition).toBe("good");
     expect(listing.status).toBe("available");
     expect(listing.items).toMatchObject([
       {
@@ -180,7 +182,7 @@ describe("store state transitions", () => {
     expect(listing.images[0].primary).toBe(true);
   });
 
-  it("rejects partial item rows and posts over the item limit", () => {
+  it("rejects missing, partial, and oversized item sets", () => {
     const partialItem = createListing(seedState, "seller-1", {
       ...draft,
       items: [
@@ -188,6 +190,7 @@ describe("store state transitions", () => {
           id: "draft-partial",
           name: "",
           price: 25,
+          condition: "good",
           position: 0,
           createdAt: "2026-05-23T10:00:00.000Z"
         }
@@ -204,12 +207,29 @@ describe("store state transitions", () => {
         }
       ]
     });
+    const noItem = createListing(seedState, "seller-1", {
+      ...draft,
+      items: []
+    });
+    const missingPrice = createListing(seedState, "seller-1", {
+      ...draft,
+      items: [
+        {
+          id: "draft-missing-price",
+          name: "Road bike",
+          condition: "good",
+          position: 0,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]
+    });
     const tooManyItems = createListing(seedState, "seller-1", {
       ...draft,
       items: Array.from({ length: MAX_LISTING_ITEMS + 1 }, (_, index) => ({
         id: `draft-item-${index}`,
         name: `Item ${index + 1}`,
         price: 10 + index,
+        condition: "good" as const,
         position: index,
         createdAt: "2026-05-23T10:00:00.000Z"
       }))
@@ -217,39 +237,16 @@ describe("store state transitions", () => {
 
     expect(partialItem).toBe(seedState);
     expect(blankItem).toBe(seedState);
+    expect(noItem).toBe(seedState);
+    expect(missingPrice).toBe(seedState);
     expect(tooManyItems).toBe(seedState);
   });
 
-  it("defaults one listing item from post fields when old drafts do not send items", () => {
+  it("rejects old drafts that do not send explicit items", () => {
     const { items: _items, ...legacyDraft } = draft;
     const next = createListing(seedState, "seller-1", legacyDraft as ListingDraft);
-    const listing = next.listings[0];
 
-    expect(listing.items).toHaveLength(1);
-    expect(listing.items[0]).toMatchObject({
-      listingId: listing.id,
-      name: "Road bike",
-      price: 420,
-      condition: "good",
-      notes: "Aluminum frame, recently tuned."
-    });
-  });
-
-  it("defaults one listing item from post fields when drafts send no customized items", () => {
-    const next = createListing(seedState, "seller-1", {
-      ...draft,
-      items: []
-    });
-    const listing = next.listings[0];
-
-    expect(listing.items).toHaveLength(1);
-    expect(listing.items[0]).toMatchObject({
-      listingId: listing.id,
-      name: "Road bike",
-      price: 420,
-      condition: "good",
-      notes: "Aluminum frame, recently tuned."
-    });
+    expect(next).toBe(seedState);
   });
 
   it("reserves an available listing once and prevents a second reservation", () => {
@@ -304,7 +301,7 @@ describe("store state transitions", () => {
     const next = updateListingDetails(seedState, "listing-1", "seller-1", {
       ...draft,
       title: "Updated road bike",
-      price: 460,
+      items: draft.items.map((item) => ({ ...item, price: 460 })),
       images: [
         ...draft.images,
         {

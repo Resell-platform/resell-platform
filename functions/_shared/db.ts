@@ -2,6 +2,7 @@ import {
   MAX_LISTING_ITEMS,
   type AppState,
   type Listing,
+  type ListingCondition,
   type ListingDraft,
   type ListingImage,
   type ListingItem,
@@ -248,6 +249,8 @@ export async function createListingInDb(env: Env, sellerId: string, draft: Listi
   const now = new Date().toISOString();
   const listingId = createId("listing");
   const items = normalizeDraftItems(draft, listingId, now);
+  const listingPrice = getListingTotalPrice(items);
+  const listingCondition = getListingSummaryCondition(items);
   const images = await Promise.all(
     draft.images.map((image, index) => persistListingImage(env, listingId, image, index === 0, now))
   );
@@ -263,9 +266,9 @@ export async function createListingInDb(env: Env, sellerId: string, draft: Listi
         sellerId,
         draft.title.trim(),
         draft.description.trim(),
-        draft.price,
+        listingPrice,
         draft.category,
-        draft.condition,
+        listingCondition,
         draft.location.trim(),
         now,
         now
@@ -324,6 +327,8 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
 
   const now = new Date().toISOString();
   const items = normalizeDraftItems(draft, listingId, now);
+  const listingPrice = getListingTotalPrice(items);
+  const listingCondition = getListingSummaryCondition(items);
   const images = await Promise.all(
     draft.images.map((image, index) => persistListingImage(env, listingId, image, index === 0, now))
   );
@@ -350,9 +355,9 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
     .bind(
       draft.title.trim(),
       draft.description.trim(),
-      draft.price,
+      listingPrice,
       draft.category.trim(),
-      draft.condition,
+      listingCondition,
       draft.location.trim(),
       now,
       listingId,
@@ -747,15 +752,6 @@ function draftItems(draft: ListingDraft): ListingItem[] {
   return Array.isArray(draft.items) ? draft.items : [];
 }
 
-function hasItemContent(item: ListingItem): boolean {
-  return Boolean(
-    item.name?.trim() ||
-      item.notes?.trim() ||
-      (Number.isFinite(item.price) && Number(item.price) > 0) ||
-      item.condition
-  );
-}
-
 function normalizeListingItem(
   item: ListingItem,
   listingId: string,
@@ -781,6 +777,24 @@ function normalizeListingItem(
   };
 }
 
+const CONDITION_RANK: Record<ListingCondition, number> = {
+  fair: 0,
+  good: 1,
+  like_new: 2,
+  new: 3
+};
+
+function getListingTotalPrice(items: ListingItem[]): number {
+  return items.reduce((total, item) => total + (Number.isFinite(item.price) ? Number(item.price) : 0), 0);
+}
+
+function getListingSummaryCondition(items: ListingItem[]): ListingCondition {
+  return items.reduce<ListingCondition>((summary, item) => {
+    if (!item.condition) return summary;
+    return CONDITION_RANK[item.condition] < CONDITION_RANK[summary] ? item.condition : summary;
+  }, "new");
+}
+
 function validateListingDraft(draft: ListingDraft) {
   const items = normalizeDraftItems(draft, "validation-listing", new Date().toISOString());
   const rawItems = draftItems(draft);
@@ -788,29 +802,30 @@ function validateListingDraft(draft: ListingDraft) {
     !draft.title.trim() ||
     !draft.description.trim() ||
     !draft.location.trim() ||
-    !draft.category.trim() ||
-    !Number.isFinite(draft.price) ||
-    draft.price <= 0
+    !draft.category.trim()
   ) {
-    throw new ApiError("Listing title, description, location, category, and price are required.");
-  }
-  if (!LISTING_CONDITIONS.has(draft.condition)) {
-    throw new ApiError("Listing condition is invalid.");
+    throw new ApiError("Listing title, description, location, and category are required.");
   }
   if (draft.images.length === 0 || draft.images.length > 6) {
     throw new ApiError("Listings must include 1-6 images.");
   }
+  if (rawItems.length === 0) {
+    throw new ApiError("Listings must include at least one item.");
+  }
   if (rawItems.length > MAX_LISTING_ITEMS) {
-    throw new ApiError(`Posts must include no more than ${MAX_LISTING_ITEMS} items.`);
+    throw new ApiError(`Listings must include no more than ${MAX_LISTING_ITEMS} items.`);
   }
-  if (rawItems.some((item) => hasItemContent(item) && !item.name?.trim())) {
-    throw new ApiError("Every post item with details must include a name.");
+  if (rawItems.some((item) => !item.name?.trim())) {
+    throw new ApiError("Every listing item must include a name.");
   }
-  if (rawItems.length > 0 && !rawItems.some((item) => item.name?.trim())) {
-    throw new ApiError("Customized post items must include at least one item name.");
+  if (rawItems.some((item) => !Number.isFinite(item.price) || Number(item.price) <= 0)) {
+    throw new ApiError("Every listing item must include a price.");
+  }
+  if (rawItems.some((item) => !item.condition || !LISTING_CONDITIONS.has(item.condition))) {
+    throw new ApiError("Every listing item must include a valid condition.");
   }
   if (items.length === 0) {
-    throw new ApiError("Posts must include at least one item.");
+    throw new ApiError("Listings must include at least one item.");
   }
 }
 
