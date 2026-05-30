@@ -1,6 +1,6 @@
 # Resell Platform
 
-MVP marketplace for seller posts with one or more items, reserving posts, seller-buyer chat, image uploads, and manual payment follow-up notifications.
+MVP marketplace for seller listings with one or more included items, buyer reservations, seller-buyer chat, image uploads, pickup or handoff coordination, hold expiration, completion, and cancellation.
 
 ## Local Development
 
@@ -36,14 +36,13 @@ npm run build
 
 ## Current MVP
 
-- Seller can publish posts with 1-6 uploaded images and one or more item rows.
-- Buyers can browse posts, reserve an available post, and open a reservation-scoped chat with the seller.
+- Seller can publish listings with 1-6 uploaded images and one or more item rows.
+- Buyers can browse listings, reserve an available listing, and open a reservation-scoped chat with the seller.
 - Cloudflare mode supports email-code account login, HttpOnly session cookies, editable profiles, and email/phone trust badge fields.
 - The H5/PWA web app supports English and Mandarin UI chrome for core marketplace workflows.
-- The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and explicit no-payment behavior.
-- Logged-in users can export their account, seller posts, post items, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
-- The app does not process payments. It tracks off-platform payment status only.
-- Payment is due 24 hours after reservation. The app creates one buyer notification and one seller notification when an unpaid reservation becomes overdue.
+- The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and reservation coordination.
+- Logged-in users can export their account, seller listings, listing items, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
+- Reservation holds expire 24 hours after reservation. The app creates one buyer notification and one seller notification when a hold expires.
 - Plain local demo users can be switched from the left navigation on desktop. Cloudflare mode uses account login instead.
 
 ## Current Limits
@@ -51,8 +50,8 @@ npm run build
 - `npm run dev` still uses browser `localStorage`; use `npm run dev:cloudflare` to exercise D1.
 - Email-code delivery uses Resend in Cloudflare mode with a per-email cooldown and hourly limit. Localhost returns the development code in the API response for testing.
 - Seed demo images are stored as data URLs for portability. New Cloudflare listing uploads are written to R2 and D1 stores the served image path plus R2 key.
-- Overdue monitoring runs when `/api/state` is called. A production scheduled Worker should be added before relying on background notifications.
-- There is no moderation, payment provider, or production SMS provider yet. Phone verification is modeled as an optional trust badge field.
+- Hold expiration checks run when `/api/state` is called. A production scheduled Worker should be added before relying on background notifications.
+- There is no moderation or production SMS provider yet. Phone verification is modeled as an optional trust badge field.
 
 ## Cloudflare Deployment
 
@@ -116,7 +115,7 @@ npm run deploy
 
 ## Product Architecture
 
-- Backend layer: Cloudflare Pages Functions / Workers, D1, R2, Resend email login, HttpOnly sessions, and no payment provider.
+- Backend layer: Cloudflare Pages Functions / Workers, D1, R2, Resend email login, HttpOnly sessions, and reservation handoff workflow.
 - Business model layer: User/Profile, Listing, ListingImage, Reservation, ChatMessage, Notification, TrustBadge, and ModerationStatus.
 - Frontend layer: current H5/PWA web app first; WeChat mini program, Xiaohongshu mini program, and Messenger WebView later.
-- Platform adapter layer: `src/platform/adapters.ts` defines login, share, notification, image upload, deep link/open-in-app, and explicit no-payment adapters. The current implementation targets H5/PWA; WeChat, Xiaohongshu, and Messenger can add platform-specific implementations against the same contracts.
+- Platform adapter layer: `src/platform/adapters.ts` defines login, share, notification, image upload, deep link/open-in-app, and reservation coordination adapters. The current implementation targets H5/PWA; WeChat, Xiaohongshu, and Messenger can add platform-specific implementations against the same contracts.

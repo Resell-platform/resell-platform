@@ -10,7 +10,7 @@ Current product rule:
 - `Listing` is the sellable and reservable object.
 - `ListingItem` is included content inside a listing.
 - Buyers reserve whole listings today.
-- Chat, manual payment status, notifications, and reservations are listing-level.
+- Chat, reservation holds, handoff completion, notifications, and reservations are listing-level.
 
 Avoid user-facing “post” language for transactional flows. Prefer:
 
@@ -45,8 +45,7 @@ Do not implement partial item purchase by only changing UI copy. Item-level rese
 - reservation line items
 - stable item IDs, no delete/reinsert updates for reserved items
 - updated locking rules
-- updated chat/order/payment context
+- updated chat/reservation/handoff context
 - backfill existing listing-level reservations as reserving all items
 
 Until that rewrite exists, the buyer CTA reserves the whole listing and all included items.
-

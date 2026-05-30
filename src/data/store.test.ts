@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  computeOverdueNotifications,
+  computeHoldExpirationNotifications,
   createListing,
   getAccountByEmail,
   getUserProfile,
@@ -285,7 +285,7 @@ describe("store state transitions", () => {
     expect(next).toBe(seedState);
     expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("reserved");
     expect(next.reservations.find((reservation) => reservation.listingId === "listing-2")?.status).toBe(
-      "awaiting_payment"
+      "requested"
     );
   });
 
@@ -371,18 +371,18 @@ describe("store state transitions", () => {
     expect(denied.messages).toHaveLength(seedState.messages.length);
   });
 
-  it("enforces manual payment permissions", () => {
-    const buyerPaid = updateReservationStatus(seedState, "reservation-1", "buyer-1", "paid");
-    const sellerPaid = updateReservationStatus(seedState, "reservation-1", "seller-1", "paid");
-    const cancelledAfterPaid = updateReservationStatus(sellerPaid, "reservation-1", "seller-1", "cancelled");
+  it("enforces handoff completion permissions", () => {
+    const buyerCompleted = updateReservationStatus(seedState, "reservation-1", "buyer-1", "sold");
+    const sellerCompleted = updateReservationStatus(seedState, "reservation-1", "seller-1", "sold");
+    const cancelledAfterCompletion = updateReservationStatus(sellerCompleted, "reservation-1", "seller-1", "cancelled");
 
-    expect(buyerPaid.reservations[0].status).toBe("awaiting_payment");
-    expect(sellerPaid.reservations[0].status).toBe("paid");
-    expect(cancelledAfterPaid.reservations[0].status).toBe("paid");
-    expect(cancelledAfterPaid.listings.find((listing) => listing.id === "listing-2")?.status).toBe("sold");
+    expect(buyerCompleted.reservations[0].status).toBe("requested");
+    expect(sellerCompleted.reservations[0].status).toBe("sold");
+    expect(cancelledAfterCompletion.reservations[0].status).toBe("sold");
+    expect(cancelledAfterCompletion.listings.find((listing) => listing.id === "listing-2")?.status).toBe("sold");
   });
 
-  it("creates overdue notifications once per overdue reservation", () => {
+  it("creates hold expiration notifications once per expired reservation", () => {
     const base: AppState = {
       ...seedState,
       notifications: [],
@@ -396,22 +396,22 @@ describe("store state transitions", () => {
       ]
     };
 
-    const first = computeOverdueNotifications(base, new Date("2026-05-23T10:00:00.000Z"));
-    const second = computeOverdueNotifications(first, new Date("2026-05-23T10:05:00.000Z"));
+    const first = computeHoldExpirationNotifications(base, new Date("2026-05-23T10:00:00.000Z"));
+    const second = computeHoldExpirationNotifications(first, new Date("2026-05-23T10:05:00.000Z"));
 
     expect(first.reservations[0].status).toBe("overdue");
     expect(first.notifications).toHaveLength(2);
     expect(second.notifications).toHaveLength(2);
   });
 
-  it("does not create overdue notifications for paid or already-notified reservations", () => {
+  it("does not create hold expiration notifications for completed or already-notified reservations", () => {
     const base: AppState = {
       ...seedState,
       notifications: [],
       reservations: [
         {
           ...seedState.reservations[0],
-          id: "reservation-paid",
+          id: "reservation-legacy-completed",
           status: "paid",
           overdueNotifiedAt: undefined,
           paymentDueAt: "2026-05-22T10:00:00.000Z"
@@ -426,7 +426,7 @@ describe("store state transitions", () => {
       ]
     };
 
-    const next = computeOverdueNotifications(base, new Date("2026-05-23T10:00:00.000Z"));
+    const next = computeHoldExpirationNotifications(base, new Date("2026-05-23T10:00:00.000Z"));
 
     expect(next).toBe(base);
     expect(next.notifications).toHaveLength(0);

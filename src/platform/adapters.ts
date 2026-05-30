@@ -60,13 +60,10 @@ export type DeepLinkAdapter = {
   open(url: string): void;
 };
 
-export type PaymentAdapter = {
+export type ReservationCoordinationAdapter = {
   target: PlatformTarget;
-  provider: "none";
-  canProcessPayment: false;
-  mode: "off_platform";
   supportedReservationStatuses: Reservation["status"][];
-  paymentNotice: string;
+  coordinationNotice: string;
 };
 
 export type PlatformAdapters = {
@@ -76,7 +73,7 @@ export type PlatformAdapters = {
   notification: NotificationAdapter;
   imageUpload: ImageUploadAdapter;
   deepLink: DeepLinkAdapter;
-  payment: PaymentAdapter;
+  reservation: ReservationCoordinationAdapter;
 };
 
 export function createWebPlatformAdapters(baseUrl = getBaseUrl()): PlatformAdapters {
@@ -87,18 +84,15 @@ export function createWebPlatformAdapters(baseUrl = getBaseUrl()): PlatformAdapt
     notification: createWebNotificationAdapter(),
     imageUpload: createWebImageUploadAdapter(),
     deepLink: createWebDeepLinkAdapter(baseUrl),
-    payment: createNoPaymentAdapter("h5-pwa")
+    reservation: createReservationCoordinationAdapter("h5-pwa")
   };
 }
 
-export function createNoPaymentAdapter(target: PlatformTarget): PaymentAdapter {
+export function createReservationCoordinationAdapter(target: PlatformTarget): ReservationCoordinationAdapter {
   return {
     target,
-    provider: "none",
-    canProcessPayment: false,
-    mode: "off_platform",
     supportedReservationStatuses: ["requested", "awaiting_payment", "payment_sent", "paid", "overdue", "cancelled", "sold"],
-    paymentNotice: "Payments stay off-platform. Use chat to coordinate and update the reservation manually."
+    coordinationNotice: "Use chat to coordinate pickup or handoff. Sellers can complete or cancel the reservation."
   };
 }
 

@@ -120,7 +120,7 @@ type StateUser = {
 };
 
 export async function readState(db: D1Database, currentUser?: StateUser): Promise<AppState> {
-  await markOverdueReservations(db);
+  await markExpiredReservationHolds(db);
 
   const [users, listings, images, items] = await Promise.all([
     db
@@ -416,7 +416,7 @@ export async function reserveListingInDb(db: D1Database, listingId: string, buye
 
   const now = new Date();
   const reservationId = createId("reservation");
-  const paymentDueAt = new Date(now.getTime() + DAY_MS).toISOString();
+  const holdExpiresAt = new Date(now.getTime() + DAY_MS).toISOString();
   const updated = await db
     .prepare(
       "UPDATE listings SET status = 'reserved', updated_at = ? WHERE id = ? AND status = 'available' AND seller_id != ?"
@@ -433,9 +433,9 @@ export async function reserveListingInDb(db: D1Database, listingId: string, buye
       .prepare(
         `INSERT INTO reservations (
           id, listing_id, buyer_id, seller_id, status, payment_due_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'awaiting_payment', ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, 'requested', ?, ?, ?)`
       )
-      .bind(reservationId, listingId, buyerId, listing.seller_id, paymentDueAt, now.toISOString(), now.toISOString()),
+      .bind(reservationId, listingId, buyerId, listing.seller_id, holdExpiresAt, now.toISOString(), now.toISOString()),
     db
       .prepare(
         `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
@@ -561,11 +561,11 @@ export async function updateReservationStatusInDb(
   if (TERMINAL_RESERVATION_STATUSES.has(reservation.status)) {
     throw new ApiError("Terminal reservations cannot be changed.", 409);
   }
-  if ((status === "paid" || status === "sold") && actorId !== reservation.seller_id) {
-    throw new ApiError("Only the seller can mark payment as paid.", 403);
+  if (status !== "sold" && status !== "cancelled") {
+    throw new ApiError("Reservation status can only be completed or cancelled.", 400);
   }
-  if (status === "payment_sent" && actorId !== reservation.buyer_id) {
-    throw new ApiError("Only the buyer can mark payment sent.", 403);
+  if (status === "sold" && actorId !== reservation.seller_id) {
+    throw new ApiError("Only the seller can complete the handoff.", 403);
   }
 
   const now = new Date().toISOString();
@@ -575,7 +575,7 @@ export async function updateReservationStatusInDb(
       .bind(status, now, reservationId)
   ];
 
-  if (status === "paid" || status === "sold") {
+  if (status === "sold") {
     statements.push(
       db
         .prepare("UPDATE listings SET status = 'sold', updated_at = ? WHERE id = ?")
@@ -585,12 +585,12 @@ export async function updateReservationStatusInDb(
       db
         .prepare(
           `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-           VALUES (?, ?, 'payment_paid', 'Payment confirmed', ?, ?, ?)`
+           VALUES (?, ?, 'payment_paid', 'Handoff complete', ?, ?, ?)`
         )
         .bind(
           createId("notification"),
           reservation.buyer_id,
-          "The seller marked your off-platform payment as received.",
+          "The seller marked your reservation as complete.",
           reservationId,
           now
         )
@@ -615,27 +615,27 @@ export async function markNotificationsReadInDb(db: D1Database, userId: string) 
     .run();
 }
 
-async function markOverdueReservations(db: D1Database) {
+async function markExpiredReservationHolds(db: D1Database) {
   const now = new Date().toISOString();
-  const overdue = await db
+  const expiredHolds = await db
     .prepare(
       `SELECT r.*, l.title, u.name AS buyer_name
        FROM reservations r
        JOIN listings l ON l.id = r.listing_id
        JOIN users u ON u.id = r.buyer_id
-       WHERE r.status = 'awaiting_payment'
+       WHERE r.status IN ('requested', 'awaiting_payment', 'payment_sent')
          AND r.overdue_notified_at IS NULL
          AND r.payment_due_at <= ?`
     )
     .bind(now)
     .all<ReservationRow & { title: string; buyer_name: string }>();
 
-  for (const reservation of overdue.results) {
+  for (const reservation of expiredHolds.results) {
     const updated = await db
       .prepare(
         `UPDATE reservations
          SET status = 'overdue', overdue_notified_at = ?, updated_at = ?
-         WHERE id = ? AND status = 'awaiting_payment' AND overdue_notified_at IS NULL`
+         WHERE id = ? AND status IN ('requested', 'awaiting_payment', 'payment_sent') AND overdue_notified_at IS NULL`
       )
       .bind(now, now, reservation.id)
       .run();
@@ -646,24 +646,24 @@ async function markOverdueReservations(db: D1Database) {
       db
         .prepare(
           `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-           VALUES (?, ?, 'payment_overdue', 'Payment overdue', ?, ?, ?)`
+           VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?)`
         )
         .bind(
           createId("notification"),
           reservation.buyer_id,
-          `Payment is overdue for ${reservation.title}.`,
+          `The hold expired for ${reservation.title}.`,
           reservation.id,
           now
         ),
       db
         .prepare(
           `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-           VALUES (?, ?, 'payment_overdue', 'Payment overdue', ?, ?, ?)`
+           VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?)`
         )
         .bind(
           createId("notification"),
           reservation.seller_id,
-          `${reservation.buyer_name} has not been marked paid for ${reservation.title}.`,
+          `${reservation.buyer_name} still has an expired hold for ${reservation.title}.`,
           reservation.id,
           now
         )

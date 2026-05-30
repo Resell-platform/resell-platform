@@ -59,13 +59,12 @@ INSERT OR IGNORE INTO reservations (
     'listing-2',
     'buyer-1',
     'seller-1',
-    'awaiting_payment',
+    'requested',
     '2026-05-23T09:00:00.000Z',
     '2026-05-22T09:00:00.000Z',
     '2026-05-22T09:00:00.000Z'
   );
 
 INSERT OR IGNORE INTO messages (id, reservation_id, sender_id, body, created_at) VALUES
-  ('message-1', 'reservation-1', 'buyer-1', 'I can pay today and pick up tomorrow.', '2026-05-22T09:30:00.000Z'),
-  ('message-2', 'reservation-1', 'seller-1', 'Sounds good. Please send payment by the deadline.', '2026-05-22T10:00:00.000Z');
-
+  ('message-1', 'reservation-1', 'buyer-1', 'I can pick up tomorrow afternoon.', '2026-05-22T09:30:00.000Z'),
+  ('message-2', 'reservation-1', 'seller-1', 'Sounds good. Please confirm pickup before the hold expires.', '2026-05-22T10:00:00.000Z');

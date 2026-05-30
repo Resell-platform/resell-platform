@@ -122,7 +122,7 @@ describe("App user flows", () => {
     expect(screen.getAllByText("Bulb pack")).not.toHaveLength(0);
   });
 
-  it("shows all customized items in post detail", () => {
+  it("shows all customized items in listing detail", () => {
     render(
       <App />,
       {
@@ -185,18 +185,18 @@ describe("App user flows", () => {
     fireEvent.click(screen.getByRole("button", { name: /chat/i }));
 
     expect(screen.getByText(/reserve a listing to start/i)).toBeInTheDocument();
-    expect(screen.queryByText(/i can pay today/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/i can pick up tomorrow/i)).not.toBeInTheDocument();
   });
 
   it("clears unread notifications when marking them read", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /alerts/i }));
-    expect(screen.getByRole("heading", { name: /payment overdue/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /hold expired/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /mark read/i }));
 
-    expect(screen.queryByRole("heading", { name: /payment overdue/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /hold expired/i })).not.toBeInTheDocument();
     expect(screen.getByText(/no unread notifications/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /mark read/i })).toBeDisabled();
   });
@@ -206,7 +206,7 @@ describe("App user flows", () => {
 
     const navigation = screen.getByLabelText(/primary navigation/i);
 
-    for (const label of ["Browse", "Sell", "Picked", "Chat"]) {
+    for (const label of ["Browse", "Sell", "Reservations", "Chat"]) {
       expect(within(navigation).getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
     expect(container.querySelector(".mobile-app-header .brand-mark")).toHaveAttribute("src", "/brand/icon-192.png");
@@ -291,7 +291,7 @@ describe("App user flows", () => {
     const cameraStatus = screen.getByLabelText(/status for mirrorless camera kit/i);
     expect(cameraStatus).toHaveValue("reserved");
     expect(cameraStatus).toBeDisabled();
-    expect(screen.getByText(/use picked or chat to mark paid or cancel/i)).toBeInTheDocument();
+    expect(screen.getByText(/use reservations or chat to complete handoff or cancel/i)).toBeInTheDocument();
 
     fireEvent.change(cameraStatus, { target: { value: "available" } });
     expect(screen.getByLabelText(/status for mirrorless camera kit/i)).toHaveValue("reserved");
@@ -333,7 +333,7 @@ describe("App user flows", () => {
     const cameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
     expect(within(cameraRow as HTMLElement).getByRole("button", { name: /edit/i })).toBeDisabled();
-    expect(screen.getByText(/use picked or chat to mark paid or cancel/i)).toBeInTheDocument();
+    expect(screen.getByText(/use reservations or chat to complete handoff or cancel/i)).toBeInTheDocument();
 
     const deskStatus = screen.getByLabelText(/status for walnut writing desk/i);
     fireEvent.change(deskStatus, { target: { value: "sold" } });
@@ -342,7 +342,7 @@ describe("App user flows", () => {
     expect(within(soldDeskRow as HTMLElement).getByRole("button", { name: /edit/i })).toBeDisabled();
   });
 
-  it("links a local seller's reserved listing to chat and picked workflow", () => {
+  it("links a local seller's reserved listing to chat and reservation workflow", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
@@ -350,30 +350,30 @@ describe("App user flows", () => {
     expect(cameraRow).not.toBeNull();
 
     expect(within(cameraRow as HTMLElement).getByText(/buyer jordan lee/i)).toBeInTheDocument();
-    expect(within(cameraRow as HTMLElement).getByText(/overdue/i)).toBeInTheDocument();
+    expect(within(cameraRow as HTMLElement).getByText(/hold expired/i)).toBeInTheDocument();
 
     fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /open chat/i }));
     expect(screen.getByRole("heading", { name: "Mirrorless camera kit" })).toBeInTheDocument();
-    expect(screen.getByText(/i can pay today/i)).toBeInTheDocument();
+    expect(screen.getByText(/i can pick up tomorrow/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
     const refreshedCameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(refreshedCameraRow).not.toBeNull();
-    fireEvent.click(within(refreshedCameraRow as HTMLElement).getByRole("button", { name: /open picked item/i }));
+    fireEvent.click(within(refreshedCameraRow as HTMLElement).getByRole("button", { name: /open reservation/i }));
 
-    expect(screen.getByRole("heading", { name: /reservations and manual payment/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /reservations and handoff/i })).toBeInTheDocument();
     expect(screen.getByText(/buyer jordan lee/i)).toBeInTheDocument();
     expect(document.querySelector(".active-order")).toHaveTextContent("Mirrorless camera kit");
   });
 
-  it("lets the local seller mark a reserved listing paid from My listings", () => {
+  it("lets the local seller complete a reserved listing from My listings", () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
     const cameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
 
-    fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /mark paid/i }));
+    fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /complete handoff/i }));
 
     expect(screen.getByLabelText(/status for mirrorless camera kit/i)).toHaveValue("sold");
     expect(screen.queryByText(/buyer jordan lee/i)).not.toBeInTheDocument();
@@ -494,9 +494,9 @@ describe("App user flows", () => {
     expect(cameraRow).not.toBeNull();
     expect(within(cameraRow as HTMLElement).getByText(/buyer jordan lee/i)).toBeInTheDocument();
 
-    fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /open picked item/i }));
+    fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /open reservation/i }));
 
-    expect(screen.getByRole("heading", { name: /reservations and manual payment/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /reservations and handoff/i })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
@@ -505,7 +505,7 @@ describe("App user flows", () => {
     fireEvent.click(within(refreshedCameraRow as HTMLElement).getByRole("button", { name: /open chat/i }));
 
     expect(screen.getByRole("heading", { name: "Mirrorless camera kit" })).toBeInTheDocument();
-    expect(screen.getByText(/i can pay today/i)).toBeInTheDocument();
+    expect(screen.getByText(/i can pick up tomorrow/i)).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
@@ -564,14 +564,14 @@ describe("App user flows", () => {
     const cameraRow = (await screen.findByText("Mirrorless camera kit")).closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
 
-    fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /mark paid/i }));
+    fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /complete handoff/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/reservations/reservation-1/status",
         expect.objectContaining({
           method: "POST",
-          body: JSON.stringify({ status: "paid" })
+          body: JSON.stringify({ status: "sold" })
         })
       );
     });
@@ -598,7 +598,7 @@ describe("App user flows", () => {
     expect(createObjectURL).toHaveBeenCalled();
   });
 
-  it("includes reserved posts and their items in local buyer exports", async () => {
+  it("includes reserved listings and their items in local buyer exports", async () => {
     const createObjectURL = vi.fn((_blob: Blob) => "blob:local-export");
     const revokeObjectURL = vi.fn();
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => undefined);

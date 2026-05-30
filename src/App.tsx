@@ -17,7 +17,7 @@ import {
   UserRound
 } from "lucide-react";
 import {
-  computeOverdueNotifications,
+  computeHoldExpirationNotifications,
   createId,
   createListing,
   getPrimaryImage,
@@ -74,6 +74,7 @@ const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
   "payment_sent",
   "overdue"
 ];
+const TERMINAL_RESERVATION_STATUSES = new Set<Reservation["status"]>(["paid", "sold", "cancelled"]);
 
 const platformAdapters = createWebPlatformAdapters();
 
@@ -85,6 +86,10 @@ function createBlankDraftItem(position: number, condition: ListingItem["conditio
     position,
     createdAt: new Date().toISOString()
   };
+}
+
+function isTerminalReservation(status: Reservation["status"]): boolean {
+  return TERMINAL_RESERVATION_STATUSES.has(status);
 }
 
 function createBlankDraft(): ListingDraft {
@@ -149,12 +154,12 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
         "Cloudflare R2",
         "Resend email login",
         "HttpOnly session cookies",
-        "No payment provider"
+        "Reservation and handoff workflow"
       ],
       businessModels: [
         "User / Profile",
-        "Listing / Seller Post",
-        "ListingItem / PostItem",
+        "Listing",
+        "ListingItem",
         "ListingImage",
         "Reservation",
         "ChatMessage",
@@ -174,7 +179,7 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
         "Notification adapter",
         "Image upload adapter",
         "Deep link / open-in-app adapter",
-        "No payment adapter"
+        "Reservation coordination adapter"
       ]
     },
     user,
@@ -319,7 +324,7 @@ export default function App() {
   const allowLocalFallback = import.meta.env.DEV;
   const [locale, setLocale] = useState<Locale>(getInitialLocale);
   const [state, setState] = useState<AppState>(() =>
-    allowLocalFallback ? computeOverdueNotifications(loadState()) : emptyCloudState
+    allowLocalFallback ? computeHoldExpirationNotifications(loadState()) : emptyCloudState
   );
   const [dataSource, setDataSource] = useState<"local" | "cloudflare">(
     allowLocalFallback ? "local" : "cloudflare"
@@ -384,7 +389,7 @@ export default function App() {
           .catch((error) => setActionError(error.message));
         return;
       }
-      setState((current) => computeOverdueNotifications(current));
+      setState((current) => computeHoldExpirationNotifications(current));
     }, 60_000);
     return () => window.clearInterval(id);
   }, [dataSource, state.activeUserId]);
@@ -555,7 +560,7 @@ export default function App() {
   ).length;
 
   function update(nextState: AppState) {
-    setState(computeOverdueNotifications(nextState));
+    setState(computeHoldExpirationNotifications(nextState));
   }
 
   function promptLogin(message: string) {
@@ -619,7 +624,7 @@ export default function App() {
     }
 
     setState((current) => {
-      const next = computeOverdueNotifications(reserveListing(current, listingId, activeUser?.id ?? ""));
+      const next = computeHoldExpirationNotifications(reserveListing(current, listingId, activeUser?.id ?? ""));
       const reservation = next.reservations.find(
         (item) =>
           item.listingId === listingId &&
@@ -809,7 +814,7 @@ export default function App() {
           />
         </nav>
         {dataSource === "local" && (
-          <button className="ghost reset" onClick={() => setState(computeOverdueNotifications(resetState()))}>
+          <button className="ghost reset" onClick={() => setState(computeHoldExpirationNotifications(resetState()))}>
             <RefreshCcw size={16} />
             {text.resetDemo}
           </button>
@@ -920,7 +925,7 @@ export default function App() {
                 ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
-            paymentNotice={text.manualPaymentNotice}
+            coordinationNotice={text.coordinationNotice}
             text={text}
             locale={locale}
           />
@@ -1722,7 +1727,7 @@ function SellView({
                     <div>
                       <p className="muted">{text.reservedHelp}</p>
                       <p>
-                        {text.buyer} {userNameFor(activeReservation.buyerId)} · {text.due}{" "}
+                        {text.buyer} {userNameFor(activeReservation.buyerId)} · {text.holdExpires}{" "}
                         {new Date(activeReservation.paymentDueAt).toLocaleString()}
                       </p>
                     </div>
@@ -1741,9 +1746,9 @@ function SellView({
                       <button
                         type="button"
                         className="secondary"
-                        onClick={() => updateReservation(activeReservation.id, "paid")}
+                        onClick={() => updateReservation(activeReservation.id, "sold")}
                       >
-                        {text.markPaid}
+                        {text.completeHandoff}
                       </button>
                       <button
                         type="button"
@@ -1910,7 +1915,7 @@ function OrdersView({
   selectedReservationId,
   openChat,
   updateStatus,
-  paymentNotice,
+  coordinationNotice,
   text,
   locale
 }: {
@@ -1920,7 +1925,7 @@ function OrdersView({
   selectedReservationId?: string;
   openChat: (id: string) => void;
   updateStatus: (reservationId: string, status: Reservation["status"]) => void;
-  paymentNotice: string;
+  coordinationNotice: string;
   text: Copy;
   locale: Locale;
 }) {
@@ -1931,7 +1936,7 @@ function OrdersView({
           <div>
             <p className="eyebrow">{text.pickedItems}</p>
             <h1>{text.ordersHeading}</h1>
-            <p className="muted">{paymentNotice}</p>
+            <p className="muted">{coordinationNotice}</p>
           </div>
         </div>
         <div className="orders">
@@ -1950,7 +1955,7 @@ function OrdersView({
                   {listing && getItemCountText(listing, text) && (
                     <p className="muted">{getItemCountText(listing, text)}</p>
                   )}
-                  <p>{text.due} {new Date(reservation.paymentDueAt).toLocaleString()}</p>
+                  <p>{text.holdExpires} {new Date(reservation.paymentDueAt).toLocaleString()}</p>
                   <p className="muted">
                     {text.buyer} {getUserName(state, reservation.buyerId)} · {text.seller} {getUserName(state, reservation.sellerId)}
                   </p>
@@ -1959,15 +1964,10 @@ function OrdersView({
                       <MessageSquare size={16} />
                       {text.chat}
                     </button>
-                    {!isSeller && (
-                      <button className="secondary" onClick={() => updateStatus(reservation.id, "payment_sent")}>
-                        {text.paymentSent}
-                      </button>
-                    )}
-                    {isSeller && (
+                    {isSeller && !isTerminalReservation(reservation.status) && (
                       <>
-                        <button className="secondary" onClick={() => updateStatus(reservation.id, "paid")}>
-                          {text.markPaid}
+                        <button className="secondary" onClick={() => updateStatus(reservation.id, "sold")}>
+                          {text.completeHandoff}
                         </button>
                         <button className="secondary" onClick={() => updateStatus(reservation.id, "cancelled")}>
                           {text.cancel}
@@ -2011,6 +2011,9 @@ function ChatView({
   const messages = state.messages.filter((message) => message.reservationId === selectedReservation?.id);
   const listing = state.listings.find((item) => item.id === selectedReservation?.listingId);
   const isSeller = selectedReservation?.sellerId === activeUserId;
+  const canResolveReservation = Boolean(
+    selectedReservation && isSeller && !isTerminalReservation(selectedReservation.status)
+  );
 
   return (
     <section className="workspace chat-layout">
@@ -2062,15 +2065,15 @@ function ChatView({
               <button className="primary">{text.send}</button>
             </form>
             <div className="button-row chat-actions">
-              {!isSeller && (
-                <button className="secondary" onClick={() => updateStatus(selectedReservation.id, "payment_sent")}>
-                  {text.paymentSent}
-                </button>
-              )}
-              {isSeller && (
-                <button className="secondary" onClick={() => updateStatus(selectedReservation.id, "paid")}>
-                  {text.markPaid}
-                </button>
+              {canResolveReservation && (
+                <>
+                  <button className="secondary" onClick={() => updateStatus(selectedReservation.id, "sold")}>
+                    {text.completeHandoff}
+                  </button>
+                  <button className="secondary" onClick={() => updateStatus(selectedReservation.id, "cancelled")}>
+                    {text.cancel}
+                  </button>
+                </>
               )}
             </div>
           </>
