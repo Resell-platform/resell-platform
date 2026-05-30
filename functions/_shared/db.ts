@@ -806,6 +806,9 @@ function validateListingDraft(draft: ListingDraft) {
   if (rawItems.some((item) => hasItemContent(item) && !item.name?.trim())) {
     throw new ApiError("Every post item with details must include a name.");
   }
+  if (rawItems.length > 0 && !rawItems.some((item) => item.name?.trim())) {
+    throw new ApiError("Customized post items must include at least one item name.");
+  }
   if (items.length === 0) {
     throw new ApiError("Posts must include at least one item.");
   }

@@ -92,7 +92,7 @@ function createBlankDraft(): ListingDraft {
     condition: "good",
     location: "",
     images: [],
-    items: [createBlankDraftItem(0)]
+    items: []
   };
 }
 
@@ -108,10 +108,12 @@ function listingToDraft(listing: Listing): ListingDraft {
       ...image,
       primary: index === 0
     })),
-    items: listing.items.map((item, index) => ({
-      ...item,
-      position: index
-    }))
+    items: isDefaultDerivedListingItem(listing)
+      ? []
+      : listing.items.map((item, index) => ({
+          ...item,
+          position: index
+        }))
   };
 }
 
@@ -250,8 +252,25 @@ function parseRealtimeEvent(data: unknown): RealtimeEvent | null {
 }
 
 function getItemCountText(listing: Listing, text: Copy) {
+  if (isDefaultDerivedListingItem(listing)) return "";
+
   const count = listing.items.length;
   return `${count} ${count === 1 ? text.itemSingular : text.itemPlural}`;
+}
+
+function getListingMetaParts(listing: Listing, text: Copy) {
+  return [
+    `$${listing.price}`,
+    getItemCountText(listing, text),
+    `${text.updated} ${new Date(listing.updatedAt).toLocaleDateString()}`
+  ].filter(Boolean);
+}
+
+function getParticipantSummary(listing: Listing, reservation: Reservation, state: AppState, text: Copy) {
+  return [
+    `${getUserName(state, reservation.buyerId)} ${text.participantAnd} ${getUserName(state, reservation.sellerId)}`,
+    getItemCountText(listing, text)
+  ].filter(Boolean);
 }
 
 function formatOptionalPrice(price?: number) {
@@ -259,10 +278,30 @@ function formatOptionalPrice(price?: number) {
 }
 
 function getListingItemSummary(listing: Listing) {
+  if (isDefaultDerivedListingItem(listing)) return [];
+
   return listing.items
     .slice()
     .sort((first, second) => first.position - second.position)
     .slice(0, 3);
+}
+
+function getListingDisplayItems(listing: Listing) {
+  if (isDefaultDerivedListingItem(listing)) return [];
+
+  return listing.items.slice().sort((first, second) => first.position - second.position);
+}
+
+function isDefaultDerivedListingItem(listing: Listing) {
+  if (listing.items.length !== 1) return false;
+
+  const [item] = listing.items;
+  return (
+    item.name === listing.title.trim() &&
+    item.price === listing.price &&
+    item.condition === listing.condition &&
+    (item.notes ?? "") === listing.description.trim()
+  );
 }
 
 function itemHasContent(item: ListingItem) {
@@ -276,8 +315,9 @@ function itemHasContent(item: ListingItem) {
 
 function hasPublishableItems(draft: ListingDraft) {
   const items = Array.isArray(draft.items) ? draft.items : [];
+  if (items.length === 0) return true;
+
   return (
-    items.length > 0 &&
     items.length <= MAX_LISTING_ITEMS &&
     items.some((item) => item.name.trim()) &&
     items.every((item) => !itemHasContent(item) || Boolean(item.name.trim()))
@@ -1206,26 +1246,33 @@ function BrowseView({
           </label>
         </div>
         <div className="listing-grid">
-          {listings.map((listing) => (
-            <button
-              key={listing.id}
-              className={selectedListing?.id === listing.id ? "listing-card selected" : "listing-card"}
-              onClick={() => selectListing(listing.id)}
-            >
-              <img src={getPrimaryImage(listing)} alt="" />
-              <div>
-                <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
-                <h2>{listing.title}</h2>
-                <p>${listing.price}</p>
-                <span className="item-count">{getItemCountText(listing, text)}</span>
-                <ul className="item-summary">
-                  {getListingItemSummary(listing).map((item) => (
-                    <li key={item.id}>{item.name}</li>
-                  ))}
-                </ul>
-              </div>
-            </button>
-          ))}
+          {listings.map((listing) => {
+            const itemSummary = getListingItemSummary(listing);
+            return (
+              <button
+                key={listing.id}
+                className={selectedListing?.id === listing.id ? "listing-card selected" : "listing-card"}
+                onClick={() => selectListing(listing.id)}
+              >
+                <img src={getPrimaryImage(listing)} alt="" />
+                <div>
+                  <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
+                  <h2>{listing.title}</h2>
+                  <p>${listing.price}</p>
+                  {itemSummary.length > 0 && (
+                    <>
+                      <span className="item-count">{getItemCountText(listing, text)}</span>
+                      <ul className="item-summary">
+                        {itemSummary.map((item) => (
+                          <li key={item.id}>{item.name}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -1237,26 +1284,33 @@ function BrowseView({
             <h2>{selectedListing.title}</h2>
             <p className="price">${selectedListing.price}</p>
             <p>{selectedListing.description}</p>
-            <section className="detail-items">
-              <div className="subsection-header">
-                <div>
-                  <span>{text.postItems}</span>
-                  <p>{getItemCountText(selectedListing, text)}</p>
-                </div>
-              </div>
-              {selectedListing.items.map((item) => (
-                <article className="detail-item" key={item.id}>
-                  <div>
-                    <strong>{item.name}</strong>
-                    {item.notes && <p>{item.notes}</p>}
+            {(() => {
+              const displayItems = getListingDisplayItems(selectedListing);
+              if (displayItems.length === 0) return null;
+
+              return (
+                <section className="detail-items">
+                  <div className="subsection-header">
+                    <div>
+                      <span>{text.postItems}</span>
+                      <p>{getItemCountText(selectedListing, text)}</p>
+                    </div>
                   </div>
-                  <div className="detail-item-meta">
-                    {formatOptionalPrice(item.price) && <span>{formatOptionalPrice(item.price)}</span>}
-                    {item.condition && <span>{statusLabel(item.condition, locale)}</span>}
-                  </div>
-                </article>
-              ))}
-            </section>
+                  {displayItems.map((item) => (
+                    <article className="detail-item" key={item.id}>
+                      <div>
+                        <strong>{item.name}</strong>
+                        {item.notes && <p>{item.notes}</p>}
+                      </div>
+                      <div className="detail-item-meta">
+                        {formatOptionalPrice(item.price) && <span>{formatOptionalPrice(item.price)}</span>}
+                        {item.condition && <span>{statusLabel(item.condition, locale)}</span>}
+                      </div>
+                    </article>
+                  ))}
+                </section>
+              );
+            })()}
             <dl>
               <div>
                 <dt>{text.condition}</dt>
@@ -1316,7 +1370,7 @@ function ListingItemFields({
   locale: Locale;
   ariaPrefix?: string;
 }) {
-  const items = draft.items.length > 0 ? draft.items : [createBlankDraftItem(0)];
+  const items = Array.isArray(draft.items) ? draft.items : [];
   const canAddItem = items.length < MAX_LISTING_ITEMS;
 
   function reindex(nextItems: ListingItem[]) {
@@ -1342,7 +1396,7 @@ function ListingItemFields({
     const remaining = items.filter((item) => item.id !== itemId);
     onChange({
       ...draft,
-      items: reindex(remaining.length > 0 ? remaining : [createBlankDraftItem(0)])
+      items: reindex(remaining)
     });
   }
 
@@ -1610,7 +1664,7 @@ function SellView({
             </select>
           </label>
           <label>
-            <span>{text.condition}</span>
+            <span>{text.overallCondition}</span>
             <select
               value={draft.condition}
               onChange={(event) => setDraft({ ...draft, condition: event.target.value as ListingDraft["condition"] })}
@@ -1658,10 +1712,7 @@ function SellView({
               <img src={getPrimaryImage(listing)} alt="" />
               <div>
                 <strong>{listing.title}</strong>
-                <p className="muted">
-                  ${listing.price} · {getItemCountText(listing, text)} · {text.updated}{" "}
-                  {new Date(listing.updatedAt).toLocaleDateString()}
-                </p>
+                <p className="muted">{getListingMetaParts(listing, text).join(" · ")}</p>
                 <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
                 {activeReservation && (
                   <div className="reservation-context">
@@ -1807,7 +1858,7 @@ function SellView({
                       </select>
                     </label>
                     <label>
-                      <span>{text.condition}</span>
+                      <span>{text.overallCondition}</span>
                       <select
                         aria-label={`Edit condition for ${listing.title}`}
                         value={editDraft.condition}
@@ -1919,7 +1970,9 @@ function OrdersView({
                 <div>
                   <span className={`badge ${reservation.status}`}>{statusLabel(reservation.status, locale)}</span>
                   <h2>{listing?.title ?? text.deletedListing}</h2>
-                  {listing && <p className="muted">{getItemCountText(listing, text)}</p>}
+                  {listing && getItemCountText(listing, text) && (
+                    <p className="muted">{getItemCountText(listing, text)}</p>
+                  )}
                   <p>{text.due} {new Date(reservation.paymentDueAt).toLocaleString()}</p>
                   <p className="muted">
                     {text.buyer} {getUserName(state, reservation.buyerId)} · {text.seller} {getUserName(state, reservation.sellerId)}
@@ -1996,7 +2049,7 @@ function ChatView({
             >
               <img src={item ? getPrimaryImage(item) : undefined} alt="" />
               <span>{item?.title ?? text.deletedListing}</span>
-              {item && <small>{getItemCountText(item, text)}</small>}
+              {item && getItemCountText(item, text) && <small>{getItemCountText(item, text)}</small>}
             </button>
           );
         })}
@@ -2008,10 +2061,7 @@ function ChatView({
               <img src={getPrimaryImage(listing)} alt="" />
               <div>
                 <h1>{listing.title}</h1>
-                <p>
-                  {getUserName(state, selectedReservation.buyerId)} {text.participantAnd}{" "}
-                  {getUserName(state, selectedReservation.sellerId)} · {getItemCountText(listing, text)}
-                </p>
+                <p>{getParticipantSummary(listing, selectedReservation, state, text).join(" · ")}</p>
               </div>
               <span className={`badge ${selectedReservation.status}`}>{statusLabel(selectedReservation.status, locale)}</span>
             </header>
