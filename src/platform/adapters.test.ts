@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildListingSharePayload, createNoPaymentAdapter, createWebPlatformAdapters } from "./adapters";
+import {
+  buildListingSharePayload,
+  createReservationCoordinationAdapter,
+  createWebPlatformAdapters
+} from "./adapters";
 import { seedState } from "../data/seed";
 
 describe("platform adapters", () => {
@@ -7,14 +11,13 @@ describe("platform adapters", () => {
     vi.unstubAllGlobals();
   });
 
-  it("keeps payment explicitly off-platform", () => {
-    const adapter = createNoPaymentAdapter("h5-pwa");
+  it("exposes reservation coordination statuses", () => {
+    const adapter = createReservationCoordinationAdapter("h5-pwa");
 
-    expect(adapter.provider).toBe("none");
-    expect(adapter.canProcessPayment).toBe(false);
-    expect(adapter.mode).toBe("off_platform");
-    expect(adapter.supportedReservationStatuses).toContain("payment_sent");
-    expect(adapter.supportedReservationStatuses).toContain("paid");
+    expect(adapter.coordinationNotice).toContain("coordinate pickup or handoff");
+    expect(adapter.supportedReservationStatuses).toContain("requested");
+    expect(adapter.supportedReservationStatuses).toContain("sold");
+    expect(adapter.supportedReservationStatuses).toContain("cancelled");
   });
 
   it("builds listing share payloads for platform share surfaces", () => {

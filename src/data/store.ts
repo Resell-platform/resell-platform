@@ -356,7 +356,7 @@ export function reserveListing(state: AppState, listingId: string, buyerId: stri
     listingId,
     buyerId,
     sellerId: listing.sellerId,
-    status: "awaiting_payment",
+    status: "requested",
     paymentDueAt: new Date(now.getTime() + DAY_MS).toISOString(),
     createdAt: now.toISOString(),
     updatedAt: now.toISOString()
@@ -430,15 +430,13 @@ export function updateReservationStatus(
   const reservation = state.reservations.find((item) => item.id === reservationId);
   if (!reservation || !canAccessReservation(reservation, actorId)) return state;
   if (["paid", "sold", "cancelled"].includes(reservation.status)) return state;
-  if (status === "paid" || status === "sold") {
-    if (actorId !== reservation.sellerId) return state;
-  }
-  if (status === "payment_sent" && actorId !== reservation.buyerId) return state;
+  if (status !== "sold" && status !== "cancelled") return state;
+  if (status === "sold" && actorId !== reservation.sellerId) return state;
 
   const now = new Date().toISOString();
   const nextListings = state.listings.map((listing) => {
     if (listing.id !== reservation.listingId) return listing;
-    if (status === "sold" || status === "paid") {
+    if (status === "sold") {
       return { ...listing, status: "sold" as const, updatedAt: now };
     }
     if (status === "cancelled") {
@@ -448,14 +446,14 @@ export function updateReservationStatus(
   });
 
   const notifications =
-    status === "paid"
+    status === "sold"
       ? [
           {
             id: createId("notification"),
             userId: reservation.buyerId,
             type: "payment_paid" as const,
-            title: "Payment confirmed",
-            body: "The seller marked your off-platform payment as received.",
+            title: "Handoff complete",
+            body: "The seller marked your reservation as complete.",
             entityId: reservationId,
             createdAt: now
           },
@@ -473,11 +471,11 @@ export function updateReservationStatus(
   };
 }
 
-export function computeOverdueNotifications(state: AppState, now = new Date()): AppState {
+export function computeHoldExpirationNotifications(state: AppState, now = new Date()): AppState {
   const createdNotifications: Notification[] = [];
   const reservations = state.reservations.map((reservation) => {
     const shouldNotify =
-      reservation.status === "awaiting_payment" &&
+      ["requested", "awaiting_payment", "payment_sent"].includes(reservation.status) &&
       !reservation.overdueNotifiedAt &&
       new Date(reservation.paymentDueAt).getTime() <= now.getTime();
 
@@ -490,8 +488,8 @@ export function computeOverdueNotifications(state: AppState, now = new Date()): 
         id: createId("notification"),
         userId: reservation.buyerId,
         type: "payment_overdue",
-        title: "Payment overdue",
-        body: `Payment is overdue for ${listing?.title ?? "your reserved item"}.`,
+        title: "Hold expired",
+        body: `The hold expired for ${listing?.title ?? "your reserved listing"}.`,
         entityId: reservation.id,
         createdAt: timestamp
       },
@@ -499,9 +497,9 @@ export function computeOverdueNotifications(state: AppState, now = new Date()): 
         id: createId("notification"),
         userId: reservation.sellerId,
         type: "payment_overdue",
-        title: "Payment overdue",
-        body: `${getUserName(state, reservation.buyerId)} has not been marked paid for ${
-          listing?.title ?? "a reserved item"
+        title: "Hold expired",
+        body: `${getUserName(state, reservation.buyerId)} still has an expired hold for ${
+          listing?.title ?? "a reserved listing"
         }.`,
         entityId: reservation.id,
         createdAt: timestamp

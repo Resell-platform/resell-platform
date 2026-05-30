@@ -78,6 +78,7 @@ export type Listing = {
   updatedAt: string;
 };
 
+// D1-compatible values; UI maps legacy payment-named statuses to hold and handoff concepts.
 export type ReservationStatus =
   | "requested"
   | "awaiting_payment"

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createListingInDb, type Env } from "./db";
+import { createListingInDb, readState, reserveListingInDb, updateReservationStatusInDb, type Env } from "./db";
 import { MAX_LISTING_ITEMS, type ListingDraft } from "../../src/data/types";
 
 type FakeStatement = {
@@ -9,6 +9,12 @@ type FakeStatement = {
   first: () => Promise<unknown>;
   all: () => Promise<{ results: unknown[] }>;
   run: () => Promise<{ meta: { changes: number } }>;
+};
+
+type FakeDbHandlers = {
+  first?: (statement: FakeStatement) => unknown;
+  all?: (statement: FakeStatement) => unknown[];
+  run?: (statement: FakeStatement) => { meta: { changes: number } };
 };
 
 function createDraft(items: ListingDraft["items"]): ListingDraft {
@@ -32,7 +38,7 @@ function createDraft(items: ListingDraft["items"]): ListingDraft {
   };
 }
 
-function createEnv() {
+function createEnv(handlers: FakeDbHandlers = {}) {
   const statements: FakeStatement[] = [];
   const batch = vi.fn(async () => []);
   const db = {
@@ -45,14 +51,16 @@ function createEnv() {
           return statement;
         },
         async first() {
+          const result = handlers.first?.(statement);
+          if (result !== undefined) return result;
           if (sql.includes("FROM users")) return { id: "seller-1", role: "seller" };
           return null;
         },
         async all() {
-          return { results: [] };
+          return { results: handlers.all?.(statement) ?? [] };
         },
         async run() {
-          return { meta: { changes: 1 } };
+          return handlers.run?.(statement) ?? { meta: { changes: 1 } };
         }
       };
       statements.push(statement);
@@ -68,8 +76,22 @@ function createEnv() {
   };
 }
 
+function createReservationRow(status = "requested") {
+  return {
+    id: "reservation-1",
+    listing_id: "listing-1",
+    buyer_id: "buyer-1",
+    seller_id: "seller-1",
+    status,
+    payment_due_at: "2026-05-22T10:00:00.000Z",
+    overdue_notified_at: null,
+    created_at: "2026-05-22T10:00:00.000Z",
+    updated_at: "2026-05-22T10:00:00.000Z"
+  };
+}
+
 describe("Cloudflare listing persistence", () => {
-  it("persists every item in a multi-item post", async () => {
+  it("persists every item in a multi-item listing", async () => {
     const { env, statements, batch } = createEnv();
 
     await createListingInDb(
@@ -182,5 +204,105 @@ describe("Cloudflare listing persistence", () => {
     expect(missingPrice.batch).not.toHaveBeenCalled();
     expect(noItems.batch).not.toHaveBeenCalled();
     expect(tooMany.batch).not.toHaveBeenCalled();
+  });
+});
+
+describe("Cloudflare reservation workflow", () => {
+  it("creates reservation holds with requested status and no payment-facing notification copy", async () => {
+    const { env, statements, batch } = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM listings")) {
+          return {
+            id: "listing-1",
+            seller_id: "seller-1",
+            title: "Mirrorless camera kit",
+            status: "available"
+          };
+        }
+        if (statement.sql.includes("SELECT name FROM users")) return { name: "Jordan Lee" };
+        return undefined;
+      }
+    });
+
+    await reserveListingInDb(env.DB, "listing-1", "buyer-1");
+
+    const reservationInsert = statements.find((statement) => statement.sql.includes("INSERT INTO reservations"));
+    const notificationInsert = statements.find((statement) => statement.sql.includes("INSERT INTO notifications"));
+    expect(batch).toHaveBeenCalledTimes(1);
+    expect(reservationInsert?.sql).toContain("'requested'");
+    expect(reservationInsert?.args.slice(1, 4)).toEqual(["listing-1", "buyer-1", "seller-1"]);
+    expect(notificationInsert?.args[2]).toBe("Jordan Lee reserved Mirrorless camera kit.");
+    expect(String(notificationInsert?.args[2]).toLowerCase()).not.toMatch(/payment|paid/);
+  });
+
+  it("only lets sellers complete handoff and rejects payment-status updates", async () => {
+    const completed = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM reservations")) return createReservationRow();
+        return undefined;
+      }
+    });
+    const buyerAttempt = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM reservations")) return createReservationRow();
+        return undefined;
+      }
+    });
+    const paymentAttempt = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM reservations")) return createReservationRow();
+        return undefined;
+      }
+    });
+
+    await updateReservationStatusInDb(completed.env.DB, "reservation-1", "seller-1", "sold");
+    await expect(
+      updateReservationStatusInDb(buyerAttempt.env.DB, "reservation-1", "buyer-1", "sold")
+    ).rejects.toThrow("Only the seller can complete the handoff.");
+    await expect(
+      updateReservationStatusInDb(paymentAttempt.env.DB, "reservation-1", "buyer-1", "payment_sent")
+    ).rejects.toThrow("Reservation status can only be completed or cancelled.");
+
+    const completedBatchCalls = completed.batch.mock.calls as unknown as [FakeStatement[]][];
+    const statements = completedBatchCalls[0]?.[0] ?? [];
+    const reservationUpdate = statements.find((statement) => statement.sql.includes("UPDATE reservations SET status"));
+    const notificationInsert = statements.find((statement) => statement.sql.includes("INSERT INTO notifications"));
+    expect(reservationUpdate).toBeDefined();
+    expect(notificationInsert).toBeDefined();
+    if (!reservationUpdate || !notificationInsert) return;
+    expect(reservationUpdate.args[0]).toBe("sold");
+    expect(notificationInsert.sql).toContain("Handoff complete");
+    expect(notificationInsert.args[2]).toBe("The seller marked your reservation as complete.");
+  });
+
+  it("expires active holds with hold language through the D1 read path", async () => {
+    const { env, statements, batch } = createEnv({
+      all(statement) {
+        if (statement.sql.includes("FROM reservations r")) {
+          return [
+            {
+              ...createReservationRow("requested"),
+              title: "Mirrorless camera kit",
+              buyer_name: "Jordan Lee"
+            }
+          ];
+        }
+        return [];
+      }
+    });
+
+    await readState(env.DB, { id: "buyer-1" });
+
+    const expirationUpdate = statements.find((statement) =>
+      statement.sql.includes("SET status = 'overdue'")
+    );
+    const expirationBatchCalls = batch.mock.calls as unknown as [FakeStatement[]][];
+    const notificationStatements = expirationBatchCalls[0]?.[0] ?? [];
+    const notificationBodies = notificationStatements.map((statement) => String(statement.args[2]));
+
+    expect(expirationUpdate?.sql).toContain("status IN ('requested', 'awaiting_payment', 'payment_sent')");
+    expect(notificationBodies).toContain("The hold expired for Mirrorless camera kit.");
+    expect(notificationBodies).toContain("Jordan Lee still has an expired hold for Mirrorless camera kit.");
+    expect(notificationBodies.join(" ").toLowerCase()).not.toMatch(/payment|paid/);
   });
 });

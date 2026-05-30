@@ -26,12 +26,12 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
             "Cloudflare R2",
             "Resend email login",
             "HttpOnly session cookies",
-            "No payment provider"
+            "Reservation and handoff workflow"
           ],
           businessModels: [
             "User / Profile",
-            "Listing / Seller Post",
-            "ListingItem / PostItem",
+            "Listing",
+            "ListingItem",
             "ListingImage",
             "Reservation",
             "ChatMessage",
@@ -51,7 +51,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
             "Notification adapter",
             "Image upload adapter",
             "Deep link / open-in-app adapter",
-            "No payment adapter"
+            "Reservation coordination adapter"
           ]
         },
         user,

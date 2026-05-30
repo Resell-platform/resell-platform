@@ -126,7 +126,7 @@ export const seedState: AppState = {
       listingId: "listing-2",
       buyerId: "buyer-1",
       sellerId: "seller-1",
-      status: "awaiting_payment",
+      status: "requested",
       paymentDueAt: pastDue,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString()
@@ -137,14 +137,14 @@ export const seedState: AppState = {
       id: "message-1",
       reservationId: "reservation-1",
       senderId: "buyer-1",
-      body: "I can pay today and pick up tomorrow.",
+      body: "I can pick up tomorrow afternoon.",
       createdAt: new Date(now.getTime() - 4 * 60 * 60 * 1000).toISOString()
     },
     {
       id: "message-2",
       reservationId: "reservation-1",
       senderId: "seller-1",
-      body: `Sounds good. Please send payment by ${new Date(futureDue).toLocaleTimeString([], {
+      body: `Sounds good. Please confirm pickup by ${new Date(futureDue).toLocaleTimeString([], {
         hour: "numeric",
         minute: "2-digit"
       })}.`,
