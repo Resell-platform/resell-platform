@@ -605,8 +605,11 @@ function hasItemContent(item: ListingItem): boolean {
 
 function hasValidDraftItems(draft: ListingDraft): boolean {
   const items = draftItems(draft);
+  if (items.length === 0) return true;
+
   return (
     items.length <= MAX_LISTING_ITEMS &&
+    items.some((item) => item.name?.trim()) &&
     items.every((item) => !hasItemContent(item) || Boolean(item.name?.trim()))
   );
 }

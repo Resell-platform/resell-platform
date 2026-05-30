@@ -193,6 +193,17 @@ describe("store state transitions", () => {
         }
       ]
     });
+    const blankItem = createListing(seedState, "seller-1", {
+      ...draft,
+      items: [
+        {
+          id: "draft-blank",
+          name: "",
+          position: 0,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]
+    });
     const tooManyItems = createListing(seedState, "seller-1", {
       ...draft,
       items: Array.from({ length: MAX_LISTING_ITEMS + 1 }, (_, index) => ({
@@ -205,12 +216,30 @@ describe("store state transitions", () => {
     });
 
     expect(partialItem).toBe(seedState);
+    expect(blankItem).toBe(seedState);
     expect(tooManyItems).toBe(seedState);
   });
 
   it("defaults one listing item from post fields when old drafts do not send items", () => {
     const { items: _items, ...legacyDraft } = draft;
     const next = createListing(seedState, "seller-1", legacyDraft as ListingDraft);
+    const listing = next.listings[0];
+
+    expect(listing.items).toHaveLength(1);
+    expect(listing.items[0]).toMatchObject({
+      listingId: listing.id,
+      name: "Road bike",
+      price: 420,
+      condition: "good",
+      notes: "Aluminum frame, recently tuned."
+    });
+  });
+
+  it("defaults one listing item from post fields when drafts send no customized items", () => {
+    const next = createListing(seedState, "seller-1", {
+      ...draft,
+      items: []
+    });
     const listing = next.listings[0];
 
     expect(listing.items).toHaveLength(1);

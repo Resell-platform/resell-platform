@@ -106,6 +106,7 @@ describe("Cloudflare listing persistence", () => {
 
   it("rejects partial item rows and posts over the item limit", async () => {
     const partial = createEnv();
+    const blank = createEnv();
     const tooMany = createEnv();
 
     await expect(
@@ -125,6 +126,20 @@ describe("Cloudflare listing persistence", () => {
     ).rejects.toThrow("Every post item with details must include a name.");
     await expect(
       createListingInDb(
+        blank.env,
+        "seller-1",
+        createDraft([
+          {
+            id: "item-blank",
+            name: "",
+            position: 0,
+            createdAt: "2026-05-23T10:00:00.000Z"
+          }
+        ])
+      )
+    ).rejects.toThrow("Customized post items must include at least one item name.");
+    await expect(
+      createListingInDb(
         tooMany.env,
         "seller-1",
         createDraft(
@@ -139,6 +154,7 @@ describe("Cloudflare listing persistence", () => {
       )
     ).rejects.toThrow(`Posts must include no more than ${MAX_LISTING_ITEMS} items.`);
     expect(partial.batch).not.toHaveBeenCalled();
+    expect(blank.batch).not.toHaveBeenCalled();
     expect(tooMany.batch).not.toHaveBeenCalled();
   });
 });

@@ -34,7 +34,7 @@ describe("App user flows", () => {
     vi.unstubAllEnvs();
   });
 
-  it("creates a listing after tracking multi-image upload and removal state", async () => {
+  it("creates a simple listing without item input after tracking multi-image upload and removal state", async () => {
     const { container } = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
@@ -58,26 +58,111 @@ describe("App user flows", () => {
       expect(container.querySelectorAll(".upload-strip img")).toHaveLength(1);
     });
 
+    expect(screen.queryByLabelText(/item name 1/i)).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Test lamp" } });
-    fireEvent.change(screen.getByLabelText(/post price/i), { target: { value: "64" } });
+    fireEvent.change(screen.getByLabelText(/total price/i), { target: { value: "64" } });
     fireEvent.change(screen.getByLabelText(/pickup or shipping notes/i), {
       target: { value: "Porch pickup" }
     });
     fireEvent.change(screen.getByLabelText(/description/i), {
       target: { value: "Brass desk lamp with working dimmer." }
     });
-    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Brass desk lamp" } });
-    fireEvent.change(screen.getByLabelText(/item price 1/i), { target: { value: "64" } });
-    fireEvent.click(screen.getByRole("button", { name: /add item/i }));
-    fireEvent.change(screen.getByLabelText(/item name 2/i), { target: { value: "Bulb pack" } });
-    fireEvent.change(screen.getByLabelText(/item price 2/i), { target: { value: "8" } });
     fireEvent.click(screen.getByRole("button", { name: /publish post/i }));
 
     expect(await screen.findAllByRole("heading", { name: "Test lamp" })).toHaveLength(2);
     expect(screen.getAllByText("$64")).not.toHaveLength(0);
     expect(screen.getByText("Porch pickup")).toBeInTheDocument();
+    expect(screen.getAllByText("Brass desk lamp with working dimmer.")).not.toHaveLength(0);
+    expect(screen.queryByText(/what's included/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/1 item/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    const createdRow = screen.getByText("Test lamp").closest(".listing-management-row");
+    expect(createdRow).not.toBeNull();
+    fireEvent.click(within(createdRow as HTMLElement).getByRole("button", { name: /edit/i }));
+    expect(screen.queryByLabelText(/edit test lamp item name 1/i)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /save changes/i })).not.toBeInTheDocument();
+    });
+  });
+
+  it("creates a multi-item listing after adding individual item rows", async () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.change(screen.getByLabelText(/images/i), {
+      target: { files: [new File(["bundle"], "bundle.png", { type: "image/png" })] }
+    });
+
+    await waitFor(() => {
+      expect(container.querySelectorAll(".upload-strip img")).toHaveLength(1);
+    });
+
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Desk bundle" } });
+    fireEvent.change(screen.getByLabelText(/total price/i), { target: { value: "72" } });
+    fireEvent.change(screen.getByLabelText(/pickup or shipping notes/i), {
+      target: { value: "Porch pickup" }
+    });
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Desk setup with a lamp and extra bulbs." }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /add individual item/i }));
+    expect(screen.getByRole("button", { name: /publish post/i })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Brass desk lamp" } });
+    fireEvent.change(screen.getByLabelText(/item price 1/i), { target: { value: "64" } });
+    fireEvent.click(screen.getByRole("button", { name: /add individual item/i }));
+    fireEvent.change(screen.getByLabelText(/item name 2/i), { target: { value: "Bulb pack" } });
+    fireEvent.change(screen.getByLabelText(/item price 2/i), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: /publish post/i }));
+
+    expect(await screen.findAllByRole("heading", { name: "Desk bundle" })).toHaveLength(2);
     expect(screen.getAllByText("Brass desk lamp")).not.toHaveLength(0);
     expect(screen.getAllByText("Bulb pack")).not.toHaveLength(0);
+  });
+
+  it("shows all customized items in post detail", () => {
+    render(
+      <App />,
+      {
+        wrapper: ({ children }) => {
+          window.localStorage.setItem(
+            "resell-platform:v1",
+            JSON.stringify({
+              version: 3,
+              data: {
+                ...seedState,
+                listings: [
+                  {
+                    ...seedState.listings[0],
+                    id: "listing-many-items",
+                    title: "Kitchen starter set",
+                    description: "Four-piece kitchen bundle.",
+                    items: [1, 2, 3, 4].map((itemNumber, index) => ({
+                      id: `kitchen-item-${itemNumber}`,
+                      listingId: "listing-many-items",
+                      name: `Kitchen item ${itemNumber}`,
+                      price: 10 * itemNumber,
+                      condition: "good" as const,
+                      position: index,
+                      createdAt: "2026-05-23T10:00:00.000Z"
+                    }))
+                  }
+                ]
+              }
+            })
+          );
+          return <>{children}</>;
+        }
+      }
+    );
+
+    expect(screen.getAllByText("4 items")).toHaveLength(2);
+    expect(screen.getAllByText("Kitchen item 1")).toHaveLength(2);
+    expect(screen.getAllByText("Kitchen item 2")).toHaveLength(2);
+    expect(screen.getAllByText("Kitchen item 3")).toHaveLength(2);
+    expect(screen.getAllByText("Kitchen item 4")).toHaveLength(1);
   });
 
   it("creates a chat message from the rendered composer and clears the input", () => {
@@ -140,14 +225,13 @@ describe("App user flows", () => {
       expect(container.querySelectorAll(".upload-strip img")).toHaveLength(1);
     });
     fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Mobile floor lamp" } });
-    fireEvent.change(screen.getByLabelText(/post price/i), { target: { value: "45" } });
+    fireEvent.change(screen.getByLabelText(/total price/i), { target: { value: "45" } });
     fireEvent.change(screen.getByLabelText(/pickup or shipping notes/i), {
       target: { value: "Lobby pickup" }
     });
     fireEvent.change(screen.getByLabelText(/description/i), {
       target: { value: "Slim lamp tested from a phone-sized layout." }
     });
-    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Slim floor lamp" } });
     fireEvent.click(screen.getByRole("button", { name: /publish post/i }));
 
     expect(await screen.findAllByRole("heading", { name: "Mobile floor lamp" })).not.toHaveLength(0);
