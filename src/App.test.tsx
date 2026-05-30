@@ -210,6 +210,22 @@ describe("App user flows", () => {
       expect(within(navigation).getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
     expect(container.querySelector(".mobile-app-header .brand-mark")).toHaveAttribute("src", "/brand/icon-192.png");
+
+    fireEvent.click(screen.getByRole("button", { name: /hide nav/i }));
+    expect(container.querySelector(".app")).toHaveClass("mobile-nav-hidden");
+    fireEvent.click(screen.getByRole("button", { name: /show nav/i }));
+    expect(container.querySelector(".app")).not.toHaveClass("mobile-nav-hidden");
+  });
+
+  it("collapses and expands the desktop sidebar", () => {
+    const { container } = render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /collapse sidebar/i }));
+    expect(container.querySelector(".app")).toHaveClass("sidebar-collapsed");
+    expect(screen.getByRole("button", { name: /expand sidebar/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /expand sidebar/i }));
+    expect(container.querySelector(".app")).not.toHaveClass("sidebar-collapsed");
   });
 
   it("keeps publish and edit listing workflows available for a mobile viewport", async () => {
@@ -384,6 +400,20 @@ describe("App user flows", () => {
     expect(await screen.findAllByText("Cloudflare D1")).not.toHaveLength(0);
     expect(screen.getAllByRole("heading", { name: "Walnut writing desk" })).not.toHaveLength(0);
     expect(screen.queryByText(/log in to browse/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the signed-in account panel compact until profile editing is opened", async () => {
+    mockCloudflareSession(seedState.users[0], cloudflarePublicState(seedState.users[0]));
+
+    render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+    expect(screen.getAllByText("Avery Chen")).not.toHaveLength(0);
+    expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no phone badge/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByRole("button", { name: /edit profile/i })[0]);
+    expect(screen.getAllByLabelText(/display name/i)).not.toHaveLength(0);
   });
 
   it("prompts login and does not reserve when a logged-out visitor clicks Reserve", async () => {
