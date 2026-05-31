@@ -396,9 +396,6 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
   if (listing.status === "sold") {
     throw new ApiError("Sold listings cannot be edited.", 409);
   }
-  if (listing.status === "reserved") {
-    throw new ApiError("Resolve the active reservation before editing this listing.", 409);
-  }
 
   const now = new Date().toISOString();
   const items = normalizeDraftItems(draft, listingId, now);
@@ -415,17 +412,11 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
            price = ?,
            category = ?,
            condition = ?,
-           location = ?,
-           updated_at = ?
+	          location = ?,
+	          updated_at = ?
        WHERE id = ?
          AND seller_id = ?
-         AND status IN ('available', 'paused')
-         AND NOT EXISTS (
-           SELECT 1
-           FROM reservations
-           WHERE listing_id = ?
-             AND status IN ('requested', 'awaiting_payment', 'payment_sent', 'overdue')
-         )`
+         AND status IN ('available', 'paused', 'reserved')`
     )
     .bind(
       draft.title.trim(),
@@ -436,13 +427,12 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
       draft.location.trim(),
       now,
       listingId,
-      sellerId,
-      listingId
+      sellerId
     )
     .run();
 
   if (!result.meta.changes) {
-    throw new ApiError("Resolve the active reservation before editing this listing.", 409);
+    throw new ApiError("Listing cannot be edited.", 409);
   }
 
   await db.batch([
@@ -488,42 +478,46 @@ export async function reserveListingInDb(db: D1Database, listingId: string, buye
   const listing = await db.prepare("SELECT * FROM listings WHERE id = ?").bind(listingId).first<ListingRow>();
   if (!listing) throw new ApiError("Listing not found.", 404);
   if (listing.seller_id === buyerId) throw new ApiError("Sellers cannot reserve their own listings.", 403);
+  if (listing.status !== "available") throw new ApiError("Listing is not available for new buyer interest.", 409);
+
+  const existing = await db
+    .prepare(
+      `SELECT id
+       FROM reservations
+       WHERE listing_id = ?
+         AND buyer_id = ?
+         AND status IN ('requested', 'awaiting_payment', 'payment_sent', 'overdue')
+       LIMIT 1`
+    )
+    .bind(listingId, buyerId)
+    .first<{ id: string }>();
+  if (existing) return;
 
   const now = new Date();
   const reservationId = createId("reservation");
   const holdExpiresAt = new Date(now.getTime() + DAY_MS).toISOString();
-  const updated = await db
-    .prepare(
-      "UPDATE listings SET status = 'reserved', updated_at = ? WHERE id = ? AND status = 'available' AND seller_id != ?"
-    )
-    .bind(now.toISOString(), listingId, buyerId)
-    .run();
 
-  if (!updated.meta.changes) {
-    throw new ApiError("Listing is no longer available.", 409);
-  }
-
-  await db.batch([
-    db
-      .prepare(
+	  await db.batch([
+	    db
+	      .prepare(
         `INSERT INTO reservations (
           id, listing_id, buyer_id, seller_id, status, payment_due_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, 'requested', ?, ?, ?)`
-      )
-      .bind(reservationId, listingId, buyerId, listing.seller_id, holdExpiresAt, now.toISOString(), now.toISOString()),
-    db
-      .prepare(
-        `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-         VALUES (?, ?, 'reservation_created', 'New reservation', ?, ?, ?)`
-      )
-      .bind(
-        createId("notification"),
-        listing.seller_id,
-        `${await getUserName(db, buyerId)} reserved ${listing.title}.`,
-        reservationId,
-        now.toISOString()
-      )
-  ]);
+	      )
+	      .bind(reservationId, listingId, buyerId, listing.seller_id, holdExpiresAt, now.toISOString(), now.toISOString()),
+	    db
+	      .prepare(
+	        `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
+	         VALUES (?, ?, 'reservation_created', 'New buyer interest', ?, ?, ?)`
+	      )
+	      .bind(
+	        createId("notification"),
+	        listing.seller_id,
+	        `${await getUserName(db, buyerId)} is interested in ${listing.title}.`,
+	        reservationId,
+	        now.toISOString()
+	      )
+	  ]);
 }
 
 export async function updateListingStatusInDb(
@@ -544,30 +538,21 @@ export async function updateListingStatusInDb(
   if (listing.status === "sold") {
     throw new ApiError("Sold listings cannot be changed.", 409);
   }
-  if (listing.status === "reserved") {
-    throw new ApiError("Resolve the active reservation before changing this listing.", 409);
-  }
 
   const now = new Date().toISOString();
-  const result = await db
-    .prepare(
-      `UPDATE listings
+	  const result = await db
+	    .prepare(
+	      `UPDATE listings
        SET status = ?, updated_at = ?
        WHERE id = ?
          AND seller_id = ?
-         AND status IN ('available', 'paused')
-         AND NOT EXISTS (
-           SELECT 1
-           FROM reservations
-           WHERE listing_id = ?
-             AND status IN ('requested', 'awaiting_payment', 'payment_sent', 'overdue')
-         )`
-    )
-    .bind(status, now, listingId, sellerId, listingId)
+         AND status IN ('available', 'paused', 'reserved')`
+	    )
+    .bind(status, now, listingId, sellerId)
     .run();
 
   if (!result.meta.changes) {
-    throw new ApiError("Resolve the active reservation before changing this listing availability.", 409);
+    throw new ApiError("Listing status could not be changed.", 409);
   }
 }
 
@@ -678,14 +663,13 @@ export async function updateReservationStatusInDb(
     const details: Partial<ReservationStatusUpdate> = typeof update === "string" ? {} : update;
     const reason = normalizeCancellationReason(details.reason);
     const note = details.note?.trim() ?? "";
-    const listingStatus = details.recoveryAction === "pause" ? "paused" : "available";
-    const recoveryState = listingStatus === "available" ? "relisted" : "closed";
+    const recoveryState = details.recoveryAction === "pause" ? "closed" : "none";
     const receiverId = reservation.seller_id === actorId ? reservation.buyer_id : reservation.seller_id;
     const [listingTitle, actorName] = await Promise.all([
       getListingTitle(db, reservation.listing_id),
       getUserName(db, actorId)
     ]);
-    const notificationBody = `${actorName} cancelled the reservation for ${listingTitle}: ${formatCancellationReason(
+    const notificationBody = `${actorName} cancelled the conversation for ${listingTitle}: ${formatCancellationReason(
       reason
     )}.`;
     statements.push(
@@ -705,11 +689,6 @@ export async function updateReservationStatusInDb(
     );
     statements.push(
       db
-        .prepare("UPDATE listings SET status = ?, updated_at = ? WHERE id = ?")
-        .bind(listingStatus, now, reservation.listing_id)
-    );
-    statements.push(
-      db
         .prepare("INSERT INTO messages (id, reservation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)")
         .bind(createId("message"), reservationId, actorId, notificationBody, now)
     );
@@ -717,7 +696,7 @@ export async function updateReservationStatusInDb(
       db
         .prepare(
           `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-           VALUES (?, ?, 'reservation_cancelled', 'Reservation cancelled', ?, ?, ?)`
+           VALUES (?, ?, 'reservation_cancelled', 'Conversation cancelled', ?, ?, ?)`
         )
         .bind(createId("notification"), receiverId, notificationBody, reservationId, now)
     );
@@ -829,33 +808,33 @@ async function markExpiredReservationHolds(db: D1Database) {
 
     if (!updated.meta.changes) continue;
 
-    await db.batch([
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO notifications (
-             id, user_id, type, title, body, entity_id, dedupe_key, created_at
-           ) VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?, ?)`
-        )
-        .bind(
-          createId("notification"),
-          reservation.buyer_id,
-          `The hold expired for ${reservation.title}.`,
-          reservation.id,
-          `reservation:${reservation.id}:hold_expired:buyer`,
-          now
-        ),
-      db
-        .prepare(
-          `INSERT OR IGNORE INTO notifications (
-             id, user_id, type, title, body, entity_id, dedupe_key, created_at
-           ) VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?, ?)`
-        )
-        .bind(
-          createId("notification"),
-          reservation.seller_id,
-          `${reservation.buyer_name} still has an expired hold for ${reservation.title}.`,
-          reservation.id,
-          `reservation:${reservation.id}:hold_expired:seller`,
+	    await db.batch([
+	      db
+	        .prepare(
+	          `INSERT OR IGNORE INTO notifications (
+	             id, user_id, type, title, body, entity_id, dedupe_key, created_at
+	           ) VALUES (?, ?, 'payment_overdue', 'Follow-up due', ?, ?, ?, ?)`
+	        )
+	        .bind(
+	          createId("notification"),
+	          reservation.buyer_id,
+	          `Follow up about ${reservation.title}.`,
+	          reservation.id,
+	          `reservation:${reservation.id}:hold_expired:buyer`,
+	          now
+	        ),
+	      db
+	        .prepare(
+	          `INSERT OR IGNORE INTO notifications (
+	             id, user_id, type, title, body, entity_id, dedupe_key, created_at
+	           ) VALUES (?, ?, 'payment_overdue', 'Follow-up due', ?, ?, ?, ?)`
+	        )
+	        .bind(
+	          createId("notification"),
+	          reservation.seller_id,
+	          `${reservation.buyer_name} may need a reply about ${reservation.title}.`,
+	          reservation.id,
+	          `reservation:${reservation.id}:hold_expired:seller`,
           now
         )
     ]);

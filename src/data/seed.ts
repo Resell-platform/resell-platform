@@ -96,7 +96,7 @@ export const seedState: AppState = {
       category: "Electronics",
       condition: "like_new",
       location: "Ships from Queens",
-      status: "reserved",
+      status: "available",
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
       items: [

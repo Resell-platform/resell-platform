@@ -340,15 +340,7 @@ export function updateListingStatus(
 ): AppState {
   const listing = state.listings.find((item) => item.id === listingId);
   if (!listing || listing.sellerId !== sellerId) return state;
-  if (listing.status === "sold" || listing.status === "reserved") return state;
-
-  const hasActiveReservation = state.reservations.some(
-    (reservation) =>
-      reservation.listingId === listingId && ACTIVE_RESERVATION_STATUSES.includes(reservation.status)
-  );
-  if (hasActiveReservation) {
-    return state;
-  }
+  if (listing.status === "sold") return state;
 
   const now = new Date().toISOString();
   return {
@@ -366,7 +358,7 @@ export function updateListingDetails(
   draft: ListingDraft
 ): AppState {
   const listing = state.listings.find((item) => item.id === listingId);
-  if (!listing || listing.sellerId !== sellerId || listing.status === "sold" || listing.status === "reserved") {
+  if (!listing || listing.sellerId !== sellerId || listing.status === "sold") {
     return state;
   }
   if (!isValidListingDraft(draft)) return state;
@@ -403,6 +395,14 @@ export function reserveListing(state: AppState, listingId: string, buyerId: stri
     return state;
   }
 
+  const existingReservation = state.reservations.find(
+    (reservation) =>
+      reservation.listingId === listingId &&
+      reservation.buyerId === buyerId &&
+      ACTIVE_RESERVATION_STATUSES.includes(reservation.status)
+  );
+  if (existingReservation) return state;
+
   const now = new Date();
   const reservation: Reservation = {
     id: createId("reservation"),
@@ -419,17 +419,14 @@ export function reserveListing(state: AppState, listingId: string, buyerId: stri
     id: createId("notification"),
     userId: listing.sellerId,
     type: "reservation_created",
-    title: "New reservation",
-    body: `${getUserName(state, buyerId)} reserved ${listing.title}.`,
+    title: "New buyer interest",
+    body: `${getUserName(state, buyerId)} is interested in ${listing.title}.`,
     entityId: reservation.id,
     createdAt: now.toISOString()
   };
 
   return {
     ...state,
-    listings: state.listings.map((item) =>
-      item.id === listingId ? { ...item, status: "reserved", updatedAt: now.toISOString() } : item
-    ),
     reservations: [reservation, ...state.reservations],
     notifications: [notification, ...state.notifications]
   };
@@ -543,8 +540,10 @@ export function cancelReservation(
   const notification = createLocalNotification({
     userId: recipientId,
     type: "reservation_cancelled",
-    title: "Reservation cancelled",
-    body: `${getUserName(state, actorId)} cancelled ${listing?.title ?? "a reservation"}. Reason: ${trimmedReason}`,
+    title: "Conversation cancelled",
+    body: `${getUserName(state, actorId)} cancelled the conversation for ${
+      listing?.title ?? "a listing"
+    }. Reason: ${trimmedReason}`,
     entityId: reservationId,
     createdAt: now
   });
@@ -552,7 +551,9 @@ export function cancelReservation(
   return {
     ...state,
     listings: state.listings.map((item) =>
-      item.id === reservation.listingId ? { ...item, status: "available" as const, updatedAt: now } : item
+      item.id === reservation.listingId && item.status === "reserved"
+        ? { ...item, status: "available" as const, updatedAt: now }
+        : item
     ),
     reservations: state.reservations.map((item) =>
       item.id === reservationId
@@ -633,22 +634,20 @@ export function computeHoldExpirationNotifications(state: AppState, now = new Da
     const timestamp = now.toISOString();
     createdNotifications.push(
       {
-        id: createId("notification"),
-        userId: reservation.buyerId,
-        type: "payment_overdue",
-        title: "Hold expired",
-        body: `The hold expired for ${listing?.title ?? "your reserved listing"}.`,
+	        id: createId("notification"),
+	        userId: reservation.buyerId,
+	        type: "payment_overdue",
+	        title: "Follow-up due",
+	        body: `Follow up about ${listing?.title ?? "your listing conversation"}.`,
         entityId: reservation.id,
         createdAt: timestamp
       },
       {
-        id: createId("notification"),
-        userId: reservation.sellerId,
-        type: "payment_overdue",
-        title: "Hold expired",
-        body: `${getUserName(state, reservation.buyerId)} still has an expired hold for ${
-          listing?.title ?? "a reserved listing"
-        }.`,
+	        id: createId("notification"),
+	        userId: reservation.sellerId,
+	        type: "payment_overdue",
+	        title: "Follow-up due",
+	        body: `${getUserName(state, reservation.buyerId)} may need a reply about ${listing?.title ?? "a listing"}.`,
         entityId: reservation.id,
         createdAt: timestamp
       }

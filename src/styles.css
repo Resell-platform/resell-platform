@@ -564,6 +564,11 @@ h2 {
   top: var(--page-gap);
 }
 
+.mobile-detail-back {
+  display: none;
+  margin-bottom: 12px;
+}
+
 .hero-image {
   width: 100%;
   aspect-ratio: 4 / 3;
@@ -1253,6 +1258,11 @@ label {
 
   .detail {
     position: static;
+  }
+
+  .mobile-detail-back {
+    display: inline-flex;
+    width: fit-content;
   }
 
   .section-header {

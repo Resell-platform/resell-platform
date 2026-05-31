@@ -257,7 +257,7 @@ describe("Cloudflare listing persistence", () => {
 });
 
 describe("Cloudflare reservation workflow", () => {
-  it("creates reservation holds with requested status and no payment-facing notification copy", async () => {
+  it("creates buyer conversations without reserving the listing", async () => {
     const { env, statements, batch } = createEnv({
       first(statement) {
         if (statement.sql.includes("FROM listings")) {
@@ -277,11 +277,34 @@ describe("Cloudflare reservation workflow", () => {
 
     const reservationInsert = statements.find((statement) => statement.sql.includes("INSERT INTO reservations"));
     const notificationInsert = statements.find((statement) => statement.sql.includes("INSERT INTO notifications"));
+    const listingLock = statements.find((statement) => statement.sql.includes("UPDATE listings SET status = 'reserved'"));
     expect(batch).toHaveBeenCalledTimes(1);
     expect(reservationInsert?.sql).toContain("'requested'");
     expect(reservationInsert?.args.slice(1, 4)).toEqual(["listing-1", "buyer-1", "seller-1"]);
-    expect(notificationInsert?.args[2]).toBe("Jordan Lee reserved Mirrorless camera kit.");
+    expect(notificationInsert?.args[2]).toBe("Jordan Lee is interested in Mirrorless camera kit.");
     expect(String(notificationInsert?.args[2]).toLowerCase()).not.toMatch(/payment|paid/);
+    expect(listingLock).toBeUndefined();
+  });
+
+  it("does not duplicate an active buyer conversation for the same listing", async () => {
+    const { env, batch } = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM listings")) {
+          return {
+            id: "listing-1",
+            seller_id: "seller-1",
+            title: "Mirrorless camera kit",
+            status: "available"
+          };
+        }
+        if (statement.sql.includes("FROM reservations")) return { id: "reservation-existing" };
+        return undefined;
+      }
+    });
+
+    await reserveListingInDb(env.DB, "listing-1", "buyer-1");
+
+    expect(batch).not.toHaveBeenCalled();
   });
 
   it("only lets sellers complete handoff and rejects payment-status updates", async () => {
@@ -324,7 +347,7 @@ describe("Cloudflare reservation workflow", () => {
     expect(notificationInsert.args[2]).toBe("The seller marked your reservation as complete.");
   });
 
-  it("records cancellation reasons and restores listing availability", async () => {
+  it("records cancellation reasons without changing listing availability", async () => {
     const cancelled = createEnv({
       first(statement) {
         if (statement.sql.includes("FROM reservations")) return createReservationRow();
@@ -346,7 +369,7 @@ describe("Cloudflare reservation workflow", () => {
     const reservationUpdate = statements.find((statement) => statement.sql.includes("cancelled_at"));
     const listingUpdate = statements.find((statement) => statement.sql.includes("UPDATE listings SET status"));
     const messageInsert = statements.find((statement) => statement.sql.includes("INSERT INTO messages"));
-    const notificationInsert = statements.find((statement) => statement.sql.includes("Reservation cancelled"));
+    const notificationInsert = statements.find((statement) => statement.sql.includes("Conversation cancelled"));
 
     expect(reservationUpdate?.args.slice(0, 6)).toEqual([
       "cancelled",
@@ -354,9 +377,9 @@ describe("Cloudflare reservation workflow", () => {
       "buyer-1",
       "Plans changed",
       "Found another option.",
-      "relisted"
+      "none"
     ]);
-    expect(listingUpdate?.args[0]).toBe("available");
+    expect(listingUpdate).toBeUndefined();
     expect(String(messageInsert?.args[3])).toContain("Plans changed");
     expect(notificationInsert?.sql).toContain("'reservation_cancelled'");
   });
@@ -421,7 +444,7 @@ describe("Cloudflare reservation workflow", () => {
     expect(handoff.batch).not.toHaveBeenCalled();
   });
 
-  it("expires active holds with hold language through the D1 read path", async () => {
+  it("expires stale buyer conversations with follow-up language through the D1 read path", async () => {
     const { env, statements, batch } = createEnv({
       all(statement) {
         if (statement.sql.includes("FROM reservations r")) {
@@ -447,8 +470,8 @@ describe("Cloudflare reservation workflow", () => {
     const notificationBodies = notificationStatements.map((statement) => String(statement.args[2]));
 
     expect(expirationUpdate?.sql).toContain("status IN ('requested', 'awaiting_payment', 'payment_sent')");
-    expect(notificationBodies).toContain("The hold expired for Mirrorless camera kit.");
-    expect(notificationBodies).toContain("Jordan Lee still has an expired hold for Mirrorless camera kit.");
+    expect(notificationBodies).toContain("Follow up about Mirrorless camera kit.");
+    expect(notificationBodies).toContain("Jordan Lee may need a reply about Mirrorless camera kit.");
     expect(notificationBodies.join(" ").toLowerCase()).not.toMatch(/payment|paid/);
   });
 });
