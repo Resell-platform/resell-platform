@@ -32,6 +32,22 @@ function fillSellerSetup() {
   });
 }
 
+function stubNarrowLayout(matches = true) {
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) => ({
+      matches: query.includes("max-width: 900px") ? matches : false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  );
+}
+
 describe("App user flows", () => {
   let webSocketMock: ReturnType<typeof installWebSocketMock>;
 
@@ -135,7 +151,8 @@ describe("App user flows", () => {
     expect(screen.getAllByText("Bulb pack")).not.toHaveLength(0);
   });
 
-  it("shows all customized items in listing detail", () => {
+  it("collapses detail items on narrow screens until expanded", async () => {
+    stubNarrowLayout();
     render(
       <App />,
       {
@@ -175,7 +192,18 @@ describe("App user flows", () => {
     expect(screen.getAllByText("Kitchen item 1")).toHaveLength(2);
     expect(screen.getAllByText("Kitchen item 2")).toHaveLength(2);
     expect(screen.getAllByText("Kitchen item 3")).toHaveLength(2);
-    expect(screen.getAllByText("Kitchen item 4")).toHaveLength(1);
+    await waitFor(() => {
+      expect(screen.queryByText("Kitchen item 4")).not.toBeInTheDocument();
+    });
+
+    const showAll = screen.getByRole("button", { name: /show all/i });
+    expect(showAll).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(showAll);
+    expect(screen.getByText("Kitchen item 4")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /show fewer/i })).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.click(screen.getByRole("button", { name: /show fewer/i }));
+    expect(screen.queryByText("Kitchen item 4")).not.toBeInTheDocument();
   });
 
   it("filters and sorts browse listings on the client", () => {
@@ -202,6 +230,56 @@ describe("App user flows", () => {
 
     const cardTitles = Array.from(container.querySelectorAll(".listing-card h2")).map((node) => node.textContent);
     expect(cardTitles[0]).toBe("Mirrorless camera kit");
+  });
+
+  it("toggles the responsive browse filters with an active filter count", () => {
+    const { container } = render(<App />);
+
+    expect(screen.getByPlaceholderText(/search listings/i)).toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /^filters$/i });
+    const controls = container.querySelector("#browse-filter-controls");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(controls).not.toHaveClass("expanded");
+
+    fireEvent.change(screen.getByLabelText(/category/i), { target: { value: "Electronics" } });
+    expect(screen.getByRole("button", { name: /filters \(1 active\)/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /filters \(1 active\)/i }));
+    expect(screen.getByRole("button", { name: /hide filters/i })).toHaveAttribute("aria-expanded", "true");
+    expect(controls).toHaveClass("expanded");
+
+    fireEvent.click(screen.getByRole("button", { name: /hide filters/i }));
+    expect(screen.getByRole("button", { name: /filters \(1 active\)/i })).toHaveAttribute("aria-expanded", "false");
+    expect(controls).not.toHaveClass("expanded");
+  });
+
+  it("lets narrow screen users explicitly collapse completed seller item rows", () => {
+    stubNarrowLayout();
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    expect(screen.getByLabelText(/item name 1/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Brass desk lamp" } });
+    fireEvent.change(screen.getByLabelText(/item price 1/i), { target: { value: "64" } });
+    const completedSummary = screen.getByRole("button", { name: /item 1.*brass desk lamp/i });
+    const controlledRegionId = completedSummary.getAttribute("aria-controls");
+    expect(controlledRegionId).toBeTruthy();
+
+    expect(completedSummary).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(controlledRegionId!)).not.toHaveAttribute("hidden");
+    expect(screen.getByLabelText(/item name 1/i)).toBeInTheDocument();
+    fireEvent.click(completedSummary);
+    expect(document.getElementById(controlledRegionId!)).toHaveAttribute("hidden");
+    expect(screen.getByRole("button", { name: /item 1.*brass desk lamp/i })).toHaveAttribute(
+      "aria-expanded",
+      "false"
+    );
+    fireEvent.click(screen.getByRole("button", { name: /item 1.*brass desk lamp/i }));
+    expect(document.getElementById(controlledRegionId!)).not.toHaveAttribute("hidden");
+
+    fireEvent.click(screen.getByRole("button", { name: /^add item$/i }));
+    expect(screen.getByLabelText(/item name 2/i)).toBeInTheDocument();
   });
 
   it("saves a structured handoff plan from a reservation", () => {
