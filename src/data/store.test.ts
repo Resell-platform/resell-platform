@@ -215,6 +215,19 @@ describe("store state transitions", () => {
     expect(sellerReadyState.users.find((user) => user.id === "seller-1")).toMatchObject(sellerSetup);
   });
 
+  it("does not require response expectation or off-platform instructions to create a listing", () => {
+    const simplifiedSetupState = updateSellerSetup(seedState, "seller-1", {
+      pickupArea: "Brooklyn",
+      offPlatformInstructions: "",
+      responseExpectation: "",
+      cancellationPolicy: "Cancel before the handoff window if plans change."
+    });
+
+    const next = createListing(simplifiedSetupState, "seller-1", draft);
+
+    expect(next.listings[0].title).toBe(draft.title);
+  });
+
   it("rejects missing, partial, and oversized item sets", () => {
     const partialItem = createListing(sellerReadyState, "seller-1", {
       ...draft,

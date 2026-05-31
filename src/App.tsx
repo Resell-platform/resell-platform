@@ -791,8 +791,6 @@ export default function App() {
             displayName: sessionUser.name,
             bio: sessionUser.bio,
             pickupArea: sellerSetup.pickupArea,
-            offPlatformInstructions: sellerSetup.offPlatformInstructions,
-            responseExpectation: sellerSetup.responseExpectation,
             cancellationPolicy: sellerSetup.cancellationPolicy
           });
           setSessionUser(result.user);
@@ -853,8 +851,6 @@ export default function App() {
         displayName: activeUser.name,
         bio: activeUser.bio,
         pickupArea: draft.pickupArea,
-        offPlatformInstructions: draft.offPlatformInstructions,
-        responseExpectation: draft.responseExpectation,
         cancellationPolicy: draft.cancellationPolicy
       }).then((result) => {
         setSessionUser(result.user);
@@ -2012,22 +2008,7 @@ function SellerSetupPanel({
           <span>{text.pickupArea}</span>
           <input value={setup.pickupArea} onChange={(event) => patch("pickupArea", event.target.value)} />
         </label>
-        <label>
-          <span>{text.responseExpectation}</span>
-          <input
-            value={setup.responseExpectation}
-            onChange={(event) => patch("responseExpectation", event.target.value)}
-          />
-        </label>
       </div>
-      <label>
-        <span>{text.offPlatformInstructions}</span>
-        <textarea
-          rows={3}
-          value={setup.offPlatformInstructions}
-          onChange={(event) => patch("offPlatformInstructions", event.target.value)}
-        />
-      </label>
       <label>
         <span>{text.cancellationHandoffPolicy}</span>
         <textarea
@@ -2091,12 +2072,7 @@ function SellView({
   }, [activeUser?.id]);
 
   const sellerListings = activeUser ? listings.filter((listing) => listing.sellerId === activeUser.id) : [];
-  const sellerSetupComplete = Boolean(
-    sellerSetup.pickupArea.trim() &&
-      sellerSetup.offPlatformInstructions.trim() &&
-      sellerSetup.responseExpectation.trim() &&
-      sellerSetup.cancellationPolicy.trim()
-  );
+  const sellerSetupComplete = Boolean(sellerSetup.pickupArea.trim() && sellerSetup.cancellationPolicy.trim());
   const canPublish =
     sellerSetupComplete &&
     draft.title.trim() &&

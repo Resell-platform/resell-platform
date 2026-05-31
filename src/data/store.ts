@@ -758,12 +758,7 @@ function hasValidDraftItems(draft: ListingDraft): boolean {
 }
 
 function isCompleteSellerSetup(setup: SellerSetupDraft): boolean {
-  return Boolean(
-    setup.pickupArea.trim() &&
-      setup.offPlatformInstructions.trim() &&
-      setup.responseExpectation.trim() &&
-      setup.cancellationPolicy.trim()
-  );
+  return Boolean(setup.pickupArea.trim() && setup.cancellationPolicy.trim());
 }
 
 function createLocalNotification(draft: {

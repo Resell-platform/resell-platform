@@ -49,26 +49,24 @@ describe("auth profile updates", () => {
     expect(update?.args.slice(13, 19)).toEqual([0, "", 0, "", 0, ""]);
   });
 
-  it("writes seller setup fields when seller setup is submitted", async () => {
+  it("activates seller setup with pickup area and cancellation policy", async () => {
     const { env, statements } = createEnv();
 
     await updateCurrentUserProfile(env, "seller-1", {
       displayName: "Avery Chen",
       bio: "Updated bio",
       pickupArea: "Brooklyn",
-      cancellationPolicy: "Cancel early if plans change.",
-      offPlatformInstructions: "Coordinate in chat.",
-      responseExpectation: "Replies within one day."
+      cancellationPolicy: "Cancel early if plans change."
     });
 
     const update = statements.find((statement) => statement.sql.includes("UPDATE users"));
     expect(update?.args.slice(13, 19)).toEqual([
       1,
       "Cancel early if plans change.",
-      1,
-      "Coordinate in chat.",
-      1,
-      "Replies within one day."
+      0,
+      "",
+      0,
+      ""
     ]);
     expect(update?.args[19]).toEqual(expect.any(String));
   });
