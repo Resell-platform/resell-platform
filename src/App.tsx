@@ -8,14 +8,15 @@ import {
   Download,
   Filter,
   ImagePlus,
-  Menu,
   MessageSquare,
   Package,
   RefreshCcw,
   Search,
   Share2,
+  Settings,
   ShoppingBag,
   Truck,
+  Type,
   Upload,
   UserRound,
   X
@@ -79,6 +80,7 @@ import {
 
 type View = "browse" | "sell" | "orders" | "chat" | "notifications";
 type BrowseSort = "newest" | "price_asc" | "price_desc" | "title";
+type TextScale = "compact" | "default" | "large";
 type BrowseFilters = {
   category: string;
   condition: string;
@@ -103,6 +105,8 @@ const DEFAULT_BROWSE_FILTERS: BrowseFilters = {
   maxPrice: "",
   sort: "newest"
 };
+const TEXT_SCALE_STORAGE_KEY = "resell-text-scale";
+const TEXT_SCALES: TextScale[] = ["compact", "default", "large"];
 
 const platformAdapters = createWebPlatformAdapters();
 
@@ -245,6 +249,12 @@ function getInitialLocale(): Locale {
   if (typeof window === "undefined") return "en";
   const stored = window.localStorage.getItem("resell-locale");
   return stored === "zh" ? "zh" : "en";
+}
+
+function getInitialTextScale(): TextScale {
+  if (typeof window === "undefined") return "default";
+  const stored = window.localStorage.getItem(TEXT_SCALE_STORAGE_KEY);
+  return TEXT_SCALES.includes(stored as TextScale) ? (stored as TextScale) : "default";
 }
 
 function parseRealtimeEvent(data: unknown): RealtimeEvent | null {
@@ -427,6 +437,7 @@ function getReservationCancellation(reservation: Reservation) {
 
 export default function App() {
   const allowLocalFallback = import.meta.env.DEV;
+  const isNarrowLayout = useNarrowLayout();
   const [locale, setLocale] = useState<Locale>(getInitialLocale);
   const [state, setState] = useState<AppState>(() =>
     allowLocalFallback ? computeHoldExpirationNotifications(loadState()) : emptyCloudState
@@ -439,7 +450,8 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [view, setView] = useState<View>("browse");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [mobileNavVisible, setMobileNavVisible] = useState(true);
+  const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [textScale, setTextScale] = useState<TextScale>(getInitialTextScale);
   const [selectedListingId, setSelectedListingId] = useState<string | null>("listing-1");
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>("reservation-1");
   const [query, setQuery] = useState("");
@@ -452,6 +464,10 @@ export default function App() {
     window.localStorage.setItem("resell-locale", locale);
     document.documentElement.lang = locale === "zh" ? "zh-Hans" : "en";
   }, [locale]);
+
+  useEffect(() => {
+    window.localStorage.setItem(TEXT_SCALE_STORAGE_KEY, textScale);
+  }, [textScale]);
 
   useEffect(() => {
     if (dataSource === "local") {
@@ -719,6 +735,7 @@ export default function App() {
     if (dataSource === "cloudflare" && !sessionUser) {
       promptLogin(message);
     }
+    setMobileSettingsOpen(false);
     setView(nextView);
   }
 
@@ -946,8 +963,14 @@ export default function App() {
     setAuthMessage(text.alertsUnavailable);
   }
 
+  const textScaleLabels: Record<TextScale, string> = {
+    compact: text.compactText,
+    default: text.defaultText,
+    large: text.largeText
+  };
+
   return (
-    <div className={`app ${sidebarCollapsed ? "sidebar-collapsed" : ""} ${mobileNavVisible ? "" : "mobile-nav-hidden"}`}>
+    <div className={`app text-scale-${textScale} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className={sidebarCollapsed ? "sidebar collapsed" : "sidebar"} aria-label="Primary navigation">
         <div className="sidebar-header">
           <div className="brand">
@@ -963,9 +986,11 @@ export default function App() {
             {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
           </button>
         </div>
-        <LanguageControl locale={locale} setLocale={setLocale} text={text} />
-        <div className="data-source">{dataSource === "cloudflare" ? "Cloudflare D1" : text.localDemo}</div>
-        {dataSource === "local" ? (
+        {!isNarrowLayout && <LanguageControl locale={locale} setLocale={setLocale} text={text} />}
+        {!isNarrowLayout && (
+          <div className="data-source">{dataSource === "cloudflare" ? "Cloudflare D1" : text.localDemo}</div>
+        )}
+        {!isNarrowLayout && dataSource === "local" ? (
           <>
             <UserSwitcher state={state} setState={setState} text={text} />
             <button className="secondary" onClick={handleExportData}>
@@ -973,7 +998,8 @@ export default function App() {
               {text.dataExport}
             </button>
           </>
-        ) : (
+        ) : null}
+        {!isNarrowLayout && dataSource === "cloudflare" ? (
           <AccountPanel
             user={sessionUser}
             message={authMessage}
@@ -997,9 +1023,17 @@ export default function App() {
               setView("browse");
             }}
           />
-        )}
+        ) : null}
         <nav>
-          <NavButton icon={<Search />} label={text.browse} active={view === "browse"} onClick={() => setView("browse")} />
+          <NavButton
+            icon={<Search />}
+            label={text.browse}
+            active={view === "browse"}
+            onClick={() => {
+              setMobileSettingsOpen(false);
+              setView("browse");
+            }}
+          />
           <NavButton
             icon={<Upload />}
             label={text.sell}
@@ -1008,7 +1042,7 @@ export default function App() {
           />
           <NavButton
             icon={<ShoppingBag />}
-            label={text.picked}
+            label={isNarrowLayout ? text.pickedItems : text.picked}
             active={view === "orders"}
             onClick={() => openProtectedView("orders", text.loginOrdersAction)}
           />
@@ -1018,14 +1052,16 @@ export default function App() {
             active={view === "chat"}
             onClick={() => openProtectedView("chat", text.loginChatAction)}
           />
-          <NavButton
-            icon={<Bell />}
-            label={`${text.alerts}${unreadCount ? ` (${unreadCount})` : ""}`}
-            active={view === "notifications"}
-            onClick={() => openProtectedView("notifications", text.loginAlertsAction)}
-          />
+          {!isNarrowLayout && (
+            <NavButton
+              icon={<Bell />}
+              label={`${text.alerts}${unreadCount ? ` (${unreadCount})` : ""}`}
+              active={view === "notifications"}
+              onClick={() => openProtectedView("notifications", text.loginAlertsAction)}
+            />
+          )}
         </nav>
-        {dataSource === "local" && (
+        {!isNarrowLayout && dataSource === "local" && (
           <button className="ghost reset" onClick={() => setState(computeHoldExpirationNotifications(resetState()))}>
             <RefreshCcw size={16} />
             {text.resetDemo}
@@ -1034,58 +1070,108 @@ export default function App() {
       </aside>
 
       <main className="main">
-        <header className="mobile-app-header">
+        <header className="mobile-app-header" aria-hidden={!isNarrowLayout}>
           <div className="brand mobile-brand">
             <img className="brand-mark" src="/brand/icon-192.png" alt="" />
             <span>Resell</span>
           </div>
-          <button
-            className="mobile-nav-toggle secondary"
-            type="button"
-            aria-label={mobileNavVisible ? text.hideNavigation : text.showNavigation}
-            onClick={() => setMobileNavVisible((visible) => !visible)}
-          >
-            <Menu size={18} />
-            <span>{mobileNavVisible ? text.hideNavigation : text.showNavigation}</span>
-          </button>
-          <div className="data-source">{dataSource === "cloudflare" ? "Cloudflare D1" : text.localDemo}</div>
+          <div className="mobile-header-actions">
+            <button
+              className="mobile-icon-button secondary"
+              type="button"
+              aria-label={`${text.alerts}${unreadCount ? ` (${unreadCount})` : ""}`}
+              onClick={() => openProtectedView("notifications", text.loginAlertsAction)}
+            >
+              <Bell size={18} />
+              {unreadCount > 0 && <span className="notification-dot">{unreadCount}</span>}
+            </button>
+            <button
+              className="mobile-icon-button secondary"
+              type="button"
+              aria-label={text.settings}
+              aria-expanded={mobileSettingsOpen}
+              onClick={() => setMobileSettingsOpen((open) => !open)}
+            >
+              <Settings size={18} />
+            </button>
+          </div>
         </header>
-        <div className="mobile-user-bar">
-          {dataSource === "local" ? (
-            <>
-              <UserSwitcher state={state} setState={setState} text={text} />
-              <button className="secondary" onClick={handleExportData}>
-                <Download size={16} />
-                {text.dataExport}
+        {isNarrowLayout && mobileSettingsOpen && (
+          <section className="mobile-settings-sheet" aria-label={text.settings}>
+            <div className="mobile-settings-header">
+              <div>
+                <p className="eyebrow">{text.settings}</p>
+                <strong>{dataSource === "cloudflare" ? "Cloudflare D1" : text.localDemo}</strong>
+              </div>
+              <button
+                className="mobile-icon-button secondary"
+                type="button"
+                aria-label={text.closeModal}
+                onClick={() => setMobileSettingsOpen(false)}
+              >
+                <X size={18} />
               </button>
-            </>
-          ) : (
-            <AccountPanel
-              user={sessionUser}
-              message={authMessage}
-              text={text}
-              loginAdapter={platformAdapters.login}
-              onMessage={setAuthMessage}
-              onExport={handleExportData}
-              onAuthenticated={(user, nextState) => {
-                setSessionUser(user);
-                setState(nextState);
-                setAuthMessage("");
-              }}
-              onProfileUpdated={(user, nextState) => {
-                setSessionUser(user);
-                setState(nextState);
-              }}
-              onLogout={async () => {
-                await platformAdapters.login.logout();
-                setSessionUser(null);
-                setState(await fetchRemoteState(""));
-                setView("browse");
-              }}
-            />
-          )}
-          <LanguageControl locale={locale} setLocale={setLocale} text={text} />
-        </div>
+            </div>
+            <div className="text-size-control" aria-label={text.textSize}>
+              <div className="text-size-heading">
+                <Type size={18} />
+                <span>{text.textSize}</span>
+              </div>
+              <div className="segmented-control">
+                {TEXT_SCALES.map((scale) => (
+                  <button
+                    key={scale}
+                    type="button"
+                    className={textScale === scale ? "active" : ""}
+                    aria-pressed={textScale === scale}
+                    onClick={() => setTextScale(scale)}
+                  >
+                    {textScaleLabels[scale]}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {dataSource === "local" ? (
+              <>
+                <UserSwitcher state={state} setState={setState} text={text} />
+                <button className="secondary" onClick={handleExportData}>
+                  <Download size={16} />
+                  {text.dataExport}
+                </button>
+                <button className="secondary" onClick={() => setState(computeHoldExpirationNotifications(resetState()))}>
+                  <RefreshCcw size={16} />
+                  {text.resetDemo}
+                </button>
+              </>
+            ) : (
+              <AccountPanel
+                user={sessionUser}
+                message={authMessage}
+                text={text}
+                loginAdapter={platformAdapters.login}
+                onMessage={setAuthMessage}
+                onExport={handleExportData}
+                onAuthenticated={(user, nextState) => {
+                  setSessionUser(user);
+                  setState(nextState);
+                  setAuthMessage("");
+                }}
+                onProfileUpdated={(user, nextState) => {
+                  setSessionUser(user);
+                  setState(nextState);
+                }}
+                onLogout={async () => {
+                  await platformAdapters.login.logout();
+                  setSessionUser(null);
+                  setState(await fetchRemoteState(""));
+                  setView("browse");
+                  setMobileSettingsOpen(false);
+                }}
+              />
+            )}
+            <LanguageControl locale={locale} setLocale={setLocale} text={text} />
+          </section>
+        )}
         {actionError && <p className="global-error">{actionError}</p>}
         {view === "browse" && (
           <BrowseView

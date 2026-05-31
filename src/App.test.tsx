@@ -352,19 +352,23 @@ describe("App user flows", () => {
   });
 
   it("keeps the primary mobile navigation visible in the rendered shell", () => {
+    stubNarrowLayout(true);
     const { container } = render(<App />);
 
     const navigation = screen.getByLabelText(/primary navigation/i);
 
-    for (const label of ["Browse", "Sell", "Reservations", "Chat"]) {
+    for (const label of ["Browse", "Sell", "Handoffs", "Chat"]) {
       expect(within(navigation).getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
+    expect(within(navigation).queryByRole("button", { name: /alerts/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /alerts \(1\)/i })).toBeInTheDocument();
     expect(container.querySelector(".mobile-app-header .brand-mark")).toHaveAttribute("src", "/brand/icon-192.png");
 
-    fireEvent.click(screen.getByRole("button", { name: /hide nav/i }));
-    expect(container.querySelector(".app")).toHaveClass("mobile-nav-hidden");
-    fireEvent.click(screen.getByRole("button", { name: /show nav/i }));
-    expect(container.querySelector(".app")).not.toHaveClass("mobile-nav-hidden");
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /large/i }));
+
+    expect(container.querySelector(".app")).toHaveClass("text-scale-large");
+    expect(window.localStorage.getItem("resell-text-scale")).toBe("large");
   });
 
   it("collapses and expands the desktop sidebar", () => {
