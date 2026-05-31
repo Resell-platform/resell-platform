@@ -7,6 +7,13 @@ type UpdateProfileBody = {
   bio?: string;
   pickupArea?: string;
   phoneE164?: string;
+  pickupZip?: string;
+  serviceAreaMiles?: number;
+  pickupPolicy?: string;
+  handoffPolicy?: string;
+  cancellationPolicy?: string;
+  offPlatformInstructions?: string;
+  responseExpectation?: string;
 };
 
 export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
@@ -26,4 +33,3 @@ export const onRequestPatch: PagesFunction<Env> = async ({ env, request }) =>
       state: await readState(env.DB, nextUser)
     });
   });
-

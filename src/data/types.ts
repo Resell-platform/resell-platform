@@ -9,6 +9,15 @@ export type User = {
   emailVerifiedAt?: string;
   phoneVerifiedAt?: string;
   pickupArea?: string;
+  pickupZip?: string;
+  serviceAreaMiles?: number;
+  pickupPolicy?: string;
+  handoffPolicy?: string;
+  cancellationPolicy?: string;
+  offPlatformInstructions?: string;
+  responseExpectation?: string;
+  sellerActivatedAt?: string;
+  emailNotificationsEnabled?: boolean;
   bio?: string;
   avatarUrl?: string;
   trustBadges?: TrustBadge[];
@@ -96,6 +105,18 @@ export type Reservation = {
   status: ReservationStatus;
   paymentDueAt: string;
   overdueNotifiedAt?: string;
+  cancelledAt?: string;
+  cancelledByUserId?: string;
+  cancellationReason?: string;
+  cancellationNote?: string;
+  recoveryState?: "none" | "relisted" | "closed";
+  handoffMethod?: "pickup" | "shipping";
+  handoffWindow?: string;
+  handoffLocation?: string;
+  handoffTracking?: string;
+  handoffNote?: string;
+  buyerConfirmedAt?: string;
+  sellerConfirmedAt?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -110,6 +131,8 @@ export type Message = {
 
 export type NotificationType =
   | "reservation_created"
+  | "reservation_cancelled"
+  | "handoff_planned"
   | "message_received"
   | "payment_due"
   | "payment_overdue"
@@ -123,6 +146,7 @@ export type Notification = {
   body: string;
   entityId?: string;
   readAt?: string;
+  dedupeKey?: string;
   createdAt: string;
 };
 

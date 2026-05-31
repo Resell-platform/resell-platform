@@ -17,6 +17,15 @@ export type CurrentUser = User & {
   avatarUrl?: string;
   bio?: string;
   pickupArea?: string;
+  pickupZip?: string;
+  serviceAreaMiles?: number;
+  pickupPolicy?: string;
+  handoffPolicy?: string;
+  cancellationPolicy?: string;
+  offPlatformInstructions?: string;
+  responseExpectation?: string;
+  sellerActivatedAt?: string;
+  emailNotificationsEnabled?: boolean;
 };
 
 type CurrentUserRow = {
@@ -30,6 +39,15 @@ type CurrentUserRow = {
   avatar_url?: string | null;
   bio?: string | null;
   pickup_area?: string | null;
+  pickup_zip?: string | null;
+  service_area_miles?: number | null;
+  pickup_policy?: string | null;
+  handoff_policy?: string | null;
+  cancellation_policy?: string | null;
+  off_platform_instructions?: string | null;
+  response_expectation?: string | null;
+  seller_activated_at?: string | null;
+  email_notifications_enabled?: number | null;
 };
 
 type SessionRow = {
@@ -229,21 +247,89 @@ export async function logout(request: Request, env: Env) {
 export async function updateCurrentUserProfile(
   env: Env,
   userId: string,
-  draft: { displayName: string; bio?: string; pickupArea?: string; phoneE164?: string }
+  draft: {
+    displayName: string;
+    bio?: string;
+    pickupArea?: string;
+    phoneE164?: string;
+    pickupZip?: string;
+    serviceAreaMiles?: number;
+    pickupPolicy?: string;
+    handoffPolicy?: string;
+    cancellationPolicy?: string;
+    offPlatformInstructions?: string;
+    responseExpectation?: string;
+  }
 ) {
   const displayName = draft.displayName.trim();
   if (!displayName) throw new ApiError("Display name is required.");
+  const hasPhone = Object.prototype.hasOwnProperty.call(draft, "phoneE164");
+  const hasPickupZip = Object.prototype.hasOwnProperty.call(draft, "pickupZip");
+  const hasServiceAreaMiles = Object.prototype.hasOwnProperty.call(draft, "serviceAreaMiles");
+  const pickupZip = draft.pickupZip?.trim() ?? "";
+  if (pickupZip && !/^\d{5}$/.test(pickupZip)) {
+    throw new ApiError("Pickup ZIP must be five digits.");
+  }
+  const serviceAreaMiles = draft.serviceAreaMiles ? Number(draft.serviceAreaMiles) : null;
+  if (serviceAreaMiles !== null && ![5, 10, 25, 50].includes(serviceAreaMiles)) {
+    throw new ApiError("Choose a valid service area.");
+  }
+  const hasPickupPolicy = Object.prototype.hasOwnProperty.call(draft, "pickupPolicy");
+  const hasHandoffPolicy = Object.prototype.hasOwnProperty.call(draft, "handoffPolicy");
+  const hasCancellationPolicy = Object.prototype.hasOwnProperty.call(draft, "cancellationPolicy");
+  const hasOffPlatformInstructions = Object.prototype.hasOwnProperty.call(draft, "offPlatformInstructions");
+  const hasResponseExpectation = Object.prototype.hasOwnProperty.call(draft, "responseExpectation");
+  const pickupPolicy = draft.pickupPolicy?.trim() ?? "";
+  const handoffPolicy = draft.handoffPolicy?.trim() ?? "";
+  const cancellationPolicy = draft.cancellationPolicy?.trim() ?? "";
+  const offPlatformInstructions = draft.offPlatformInstructions?.trim() ?? "";
+  const responseExpectation = draft.responseExpectation?.trim() ?? "";
+  const pickupArea = draft.pickupArea?.trim() ?? "";
+  const sellerActivatedAt =
+    pickupArea && offPlatformInstructions && responseExpectation && cancellationPolicy ? nowIso() : null;
   const now = new Date().toISOString();
   await env.DB.prepare(
     `UPDATE users
-     SET name = ?, bio = ?, pickup_area = ?, phone_e164 = ?, updated_at = ?
+     SET name = ?,
+         bio = ?,
+         pickup_area = ?,
+         phone_e164 = CASE WHEN ? THEN ? ELSE phone_e164 END,
+         pickup_zip = CASE WHEN ? THEN ? ELSE pickup_zip END,
+         service_area_miles = CASE WHEN ? THEN ? ELSE service_area_miles END,
+         pickup_policy = CASE WHEN ? THEN ? ELSE pickup_policy END,
+         handoff_policy = CASE WHEN ? THEN ? ELSE handoff_policy END,
+         cancellation_policy = CASE WHEN ? THEN ? ELSE cancellation_policy END,
+         off_platform_instructions = CASE WHEN ? THEN ? ELSE off_platform_instructions END,
+         response_expectation = CASE WHEN ? THEN ? ELSE response_expectation END,
+         seller_activated_at = CASE
+           WHEN ? IS NOT NULL THEN COALESCE(seller_activated_at, ?)
+           ELSE seller_activated_at
+         END,
+         updated_at = ?
      WHERE id = ?`
   )
     .bind(
       displayName,
       draft.bio?.trim() ?? "",
-      draft.pickupArea?.trim() ?? "",
+      pickupArea,
+      hasPhone ? 1 : 0,
       draft.phoneE164?.trim() || null,
+      hasPickupZip ? 1 : 0,
+      pickupZip || null,
+      hasServiceAreaMiles ? 1 : 0,
+      serviceAreaMiles,
+      hasPickupPolicy ? 1 : 0,
+      pickupPolicy,
+      hasHandoffPolicy ? 1 : 0,
+      handoffPolicy,
+      hasCancellationPolicy ? 1 : 0,
+      cancellationPolicy,
+      hasOffPlatformInstructions ? 1 : 0,
+      offPlatformInstructions,
+      hasResponseExpectation ? 1 : 0,
+      responseExpectation,
+      sellerActivatedAt,
+      sellerActivatedAt,
       now,
       userId
     )
@@ -258,6 +344,16 @@ export function toPublicUser(user: CurrentUser | User) {
     emailVerifiedAt: "emailVerifiedAt" in user ? user.emailVerifiedAt : undefined,
     phoneVerifiedAt: "phoneVerifiedAt" in user ? user.phoneVerifiedAt : undefined,
     pickupArea: "pickupArea" in user ? user.pickupArea : undefined,
+    pickupZip: "pickupZip" in user ? user.pickupZip : undefined,
+    serviceAreaMiles: "serviceAreaMiles" in user ? user.serviceAreaMiles : undefined,
+    pickupPolicy: "pickupPolicy" in user ? user.pickupPolicy : undefined,
+    handoffPolicy: "handoffPolicy" in user ? user.handoffPolicy : undefined,
+    cancellationPolicy: "cancellationPolicy" in user ? user.cancellationPolicy : undefined,
+    offPlatformInstructions: "offPlatformInstructions" in user ? user.offPlatformInstructions : undefined,
+    responseExpectation: "responseExpectation" in user ? user.responseExpectation : undefined,
+    sellerActivatedAt: "sellerActivatedAt" in user ? user.sellerActivatedAt : undefined,
+    emailNotificationsEnabled:
+      "emailNotificationsEnabled" in user ? user.emailNotificationsEnabled : undefined,
     bio: "bio" in user ? user.bio : undefined,
     avatarUrl: "avatarUrl" in user ? user.avatarUrl : undefined
   };
@@ -274,8 +370,21 @@ function toCurrentUser(row: CurrentUserRow): CurrentUser {
     phoneVerifiedAt: row.phone_verified_at ?? undefined,
     avatarUrl: row.avatar_url ?? undefined,
     bio: row.bio ?? undefined,
-    pickupArea: row.pickup_area ?? undefined
+    pickupArea: row.pickup_area ?? undefined,
+    pickupZip: row.pickup_zip ?? undefined,
+    serviceAreaMiles: row.service_area_miles ?? undefined,
+    pickupPolicy: row.pickup_policy ?? undefined,
+    handoffPolicy: row.handoff_policy ?? undefined,
+    cancellationPolicy: row.cancellation_policy ?? undefined,
+    offPlatformInstructions: row.off_platform_instructions ?? undefined,
+    responseExpectation: row.response_expectation ?? undefined,
+    sellerActivatedAt: row.seller_activated_at ?? undefined,
+    emailNotificationsEnabled: row.email_notifications_enabled !== 0
   };
+}
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
 function normalizeEmail(email: string) {

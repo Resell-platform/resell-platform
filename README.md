@@ -36,13 +36,14 @@ npm run build
 
 ## Current MVP
 
-- Seller can publish listings with 1-6 uploaded images and one or more item rows.
-- Buyers can browse listings, reserve an available listing, and open a reservation-scoped chat with the seller.
+- Seller can publish listings with 1-6 uploaded images and one or more item rows after completing seller setup.
+- Buyers can browse listings with structured filters, reserve an available listing, and open a reservation-scoped chat with the seller.
+- Reservations support cancellation reasons and a lightweight handoff plan for pickup or shipping coordination.
 - Cloudflare mode supports email-code account login, HttpOnly session cookies, editable profiles, and email/phone trust badge fields.
 - The H5/PWA web app supports English and Mandarin UI chrome for core marketplace workflows.
 - The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and reservation coordination.
 - Logged-in users can export their account, seller listings, listing items, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
-- Reservation holds expire 24 hours after reservation. The app creates one buyer notification and one seller notification when a hold expires.
+- Reservation holds expire 24 hours after reservation. `/api/state` and the scheduled realtime Worker create idempotent buyer/seller hold-expiration notifications.
 - Plain local demo users can be switched from the left navigation on desktop. Cloudflare mode uses account login instead.
 
 ## Current Limits
@@ -50,8 +51,8 @@ npm run build
 - `npm run dev` still uses browser `localStorage`; use `npm run dev:cloudflare` to exercise D1.
 - Email-code delivery uses Resend in Cloudflare mode with a per-email cooldown and hourly limit. Localhost returns the development code in the API response for testing.
 - Seed demo images are stored as data URLs for portability. New Cloudflare listing uploads are written to R2 and D1 stores the served image path plus R2 key.
-- Hold expiration checks run when `/api/state` is called. A production scheduled Worker should be added before relying on background notifications.
-- There is no moderation or production SMS provider yet. Phone verification is modeled as an optional trust badge field.
+- Hold expiration checks run from both `/api/state` and the scheduled realtime Worker. In-app notifications remain the canonical history.
+- There is no moderation, production SMS provider, or external email notification delivery yet. Phone verification is modeled as an optional trust badge field.
 
 ## Cloudflare Deployment
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  cancelReservation,
   computeHoldExpirationNotifications,
   createListing,
   getAccountByEmail,
@@ -8,8 +9,10 @@ import {
   registerAccount,
   reserveListing,
   sendMessage,
+  updateReservationHandoffPlan,
   updateListingDetails,
   updateListingStatus,
+  updateSellerSetup,
   updateUserProfile,
   updateReservationStatus
 } from "./store";
@@ -44,6 +47,15 @@ const draft: ListingDraft = {
     }
   ]
 };
+
+const sellerSetup = {
+  pickupArea: "Brooklyn",
+  offPlatformInstructions: "Share phone details only after both sides confirm in chat.",
+  responseExpectation: "Respond within 24 hours.",
+  cancellationPolicy: "Cancel before the handoff window if plans change."
+};
+
+const sellerReadyState = updateSellerSetup(seedState, "seller-1", sellerSetup);
 
 describe("store state transitions", () => {
   it("registers a local account, profile, and active user", () => {
@@ -143,7 +155,7 @@ describe("store state transitions", () => {
   });
 
   it("creates a listing with image metadata and available status", () => {
-    const next = createListing(seedState, "seller-1", {
+    const next = createListing(sellerReadyState, "seller-1", {
       ...draft,
       items: [
         ...draft.items,
@@ -182,8 +194,29 @@ describe("store state transitions", () => {
     expect(listing.images[0].primary).toBe(true);
   });
 
+  it("requires seller setup before creating a listing", () => {
+    const incompleteSellerState: AppState = {
+      ...seedState,
+      users: seedState.users.map((user) =>
+        user.id === "seller-1"
+          ? {
+              ...user,
+              pickupArea: "",
+              offPlatformInstructions: "",
+              responseExpectation: "",
+              cancellationPolicy: ""
+            }
+          : user
+      )
+    };
+    const blocked = createListing(incompleteSellerState, "seller-1", draft);
+
+    expect(blocked).toBe(incompleteSellerState);
+    expect(sellerReadyState.users.find((user) => user.id === "seller-1")).toMatchObject(sellerSetup);
+  });
+
   it("rejects missing, partial, and oversized item sets", () => {
-    const partialItem = createListing(seedState, "seller-1", {
+    const partialItem = createListing(sellerReadyState, "seller-1", {
       ...draft,
       items: [
         {
@@ -196,7 +229,7 @@ describe("store state transitions", () => {
         }
       ]
     });
-    const blankItem = createListing(seedState, "seller-1", {
+    const blankItem = createListing(sellerReadyState, "seller-1", {
       ...draft,
       items: [
         {
@@ -207,11 +240,11 @@ describe("store state transitions", () => {
         }
       ]
     });
-    const noItem = createListing(seedState, "seller-1", {
+    const noItem = createListing(sellerReadyState, "seller-1", {
       ...draft,
       items: []
     });
-    const missingPrice = createListing(seedState, "seller-1", {
+    const missingPrice = createListing(sellerReadyState, "seller-1", {
       ...draft,
       items: [
         {
@@ -223,7 +256,7 @@ describe("store state transitions", () => {
         }
       ]
     });
-    const tooManyItems = createListing(seedState, "seller-1", {
+    const tooManyItems = createListing(sellerReadyState, "seller-1", {
       ...draft,
       items: Array.from({ length: MAX_LISTING_ITEMS + 1 }, (_, index) => ({
         id: `draft-item-${index}`,
@@ -235,18 +268,18 @@ describe("store state transitions", () => {
       }))
     });
 
-    expect(partialItem).toBe(seedState);
-    expect(blankItem).toBe(seedState);
-    expect(noItem).toBe(seedState);
-    expect(missingPrice).toBe(seedState);
-    expect(tooManyItems).toBe(seedState);
+    expect(partialItem).toBe(sellerReadyState);
+    expect(blankItem).toBe(sellerReadyState);
+    expect(noItem).toBe(sellerReadyState);
+    expect(missingPrice).toBe(sellerReadyState);
+    expect(tooManyItems).toBe(sellerReadyState);
   });
 
   it("rejects old drafts that do not send explicit items", () => {
     const { items: _items, ...legacyDraft } = draft;
-    const next = createListing(seedState, "seller-1", legacyDraft as ListingDraft);
+    const next = createListing(sellerReadyState, "seller-1", legacyDraft as ListingDraft);
 
-    expect(next).toBe(seedState);
+    expect(next).toBe(sellerReadyState);
   });
 
   it("reserves an available listing once and prevents a second reservation", () => {
@@ -380,6 +413,54 @@ describe("store state transitions", () => {
     expect(sellerCompleted.reservations[0].status).toBe("sold");
     expect(cancelledAfterCompletion.reservations[0].status).toBe("sold");
     expect(cancelledAfterCompletion.listings.find((listing) => listing.id === "listing-2")?.status).toBe("sold");
+  });
+
+  it("stores structured handoff plans and notifies the other participant", () => {
+    const planned = updateReservationHandoffPlan(seedState, "reservation-1", "buyer-1", {
+      mode: "pickup",
+      window: "Saturday 2-4 PM",
+      locationOrTracking: "Lobby entrance",
+      note: "Text when nearby."
+    });
+    const reservation = planned.reservations.find((item) => item.id === "reservation-1");
+
+    expect(reservation?.status).toBe("payment_sent");
+    expect(reservation).toMatchObject({
+      handoffMethod: "pickup",
+      handoffWindow: "Saturday 2-4 PM",
+      handoffLocation: "Lobby entrance",
+      handoffNote: "Text when nearby."
+    });
+    expect(planned.notifications[0]).toMatchObject({
+      userId: "seller-1",
+      type: "handoff_planned",
+      entityId: "reservation-1"
+    });
+  });
+
+  it("stores cancellation reasons for buyers and sellers and reopens the listing", () => {
+    const buyerCancelled = cancelReservation(seedState, "reservation-1", "buyer-1", "Plans changed");
+    const sellerCancelled = cancelReservation(seedState, "reservation-1", "seller-1", "Item unavailable");
+
+    expect(buyerCancelled.reservations[0]).toMatchObject({
+      status: "cancelled",
+      cancellationReason: "Plans changed",
+      cancelledByUserId: "buyer-1"
+    });
+    expect(buyerCancelled.listings.find((listing) => listing.id === "listing-2")?.status).toBe("available");
+    expect(buyerCancelled.notifications[0]).toMatchObject({
+      userId: "seller-1",
+      type: "reservation_cancelled"
+    });
+    expect(sellerCancelled.reservations[0]).toMatchObject({
+      status: "cancelled",
+      cancellationReason: "Item unavailable",
+      cancelledByUserId: "seller-1"
+    });
+    expect(sellerCancelled.notifications[0]).toMatchObject({
+      userId: "buyer-1",
+      type: "reservation_cancelled"
+    });
   });
 
   it("creates hold expiration notifications once per expired reservation", () => {
