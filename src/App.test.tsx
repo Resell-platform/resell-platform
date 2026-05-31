@@ -23,10 +23,6 @@ function installLocalStorage() {
 
 function fillSellerSetup() {
   fireEvent.change(screen.getByLabelText(/pickup area/i), { target: { value: "Brooklyn" } });
-  fireEvent.change(screen.getByLabelText(/response expectation/i), { target: { value: "Replies within 24 hours" } });
-  fireEvent.change(screen.getByLabelText(/off-platform instructions/i), {
-    target: { value: "Share phone details only after both sides confirm in chat." }
-  });
   fireEvent.change(screen.getByLabelText(/cancellation and handoff policy/i), {
     target: { value: "Cancel before the handoff window if plans change." }
   });
@@ -64,9 +60,11 @@ describe("App user flows", () => {
   it("creates a single-item listing after tracking multi-image upload and removal state", async () => {
     const { container } = render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
-    fillSellerSetup();
-    const imageInput = screen.getByLabelText(/images/i);
+	    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+	    fillSellerSetup();
+	    expect(screen.queryByLabelText(/response expectation/i)).not.toBeInTheDocument();
+	    expect(screen.queryByLabelText(/off-platform instructions/i)).not.toBeInTheDocument();
+	    const imageInput = screen.getByLabelText(/images/i);
     const files = [
       new File(["first"], "first.png", { type: "image/png" }),
       new File(["second"], "second.jpg", { type: "image/jpeg" })
@@ -675,13 +673,13 @@ describe("App user flows", () => {
     fireEvent.click(screen.getByRole("button", { name: /publish listing/i }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/me",
-        expect.objectContaining({
-          method: "PATCH",
-          body: expect.stringContaining("Share phone details only after both sides confirm in chat.")
-        })
-      );
+	      expect(fetchMock).toHaveBeenCalledWith(
+	        "/api/me",
+	        expect.objectContaining({
+	          method: "PATCH",
+	          body: expect.stringContaining("Cancel before the handoff window if plans change.")
+	        })
+	      );
       expect(fetchMock).toHaveBeenCalledWith(
         "/api/listings",
         expect.objectContaining({

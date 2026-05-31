@@ -285,8 +285,7 @@ export async function updateCurrentUserProfile(
   const offPlatformInstructions = draft.offPlatformInstructions?.trim() ?? "";
   const responseExpectation = draft.responseExpectation?.trim() ?? "";
   const pickupArea = draft.pickupArea?.trim() ?? "";
-  const sellerActivatedAt =
-    pickupArea && offPlatformInstructions && responseExpectation && cancellationPolicy ? nowIso() : null;
+  const sellerActivatedAt = pickupArea && cancellationPolicy ? nowIso() : null;
   const now = new Date().toISOString();
   await env.DB.prepare(
     `UPDATE users

@@ -254,6 +254,42 @@ describe("Cloudflare listing persistence", () => {
     ).rejects.toThrow("Complete seller setup before publishing a listing.");
     expect(blocked.batch).not.toHaveBeenCalled();
   });
+
+  it("allows publishing without response expectation or off-platform instructions", async () => {
+    const simplified = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM users")) {
+          return {
+            id: "seller-1",
+            role: "seller",
+            pickup_area: "Brooklyn",
+            cancellation_policy: "Cancel before the handoff window if plans change.",
+            off_platform_instructions: "",
+            response_expectation: ""
+          };
+        }
+        return undefined;
+      }
+    });
+
+    await createListingInDb(
+      simplified.env,
+      "seller-1",
+      createDraft([
+        {
+          id: "item-1",
+          name: "Saucepan",
+          price: 35,
+          condition: "good",
+          notes: "Stainless steel",
+          position: 0,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ])
+    );
+
+    expect(simplified.batch).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("Cloudflare reservation workflow", () => {

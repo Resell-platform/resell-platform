@@ -894,12 +894,7 @@ function normalizeHandoffMethod(method?: Reservation["handoffMethod"]) {
 }
 
 function isSellerReady(seller: UserRow) {
-  return Boolean(
-    seller.pickup_area?.trim() &&
-      seller.off_platform_instructions?.trim() &&
-      seller.cancellation_policy?.trim() &&
-      seller.response_expectation?.trim()
-  );
+  return Boolean(seller.pickup_area?.trim() && seller.cancellation_policy?.trim());
 }
 
 function normalizeListingFromRow(row: ListingRow, images: ListingImage[], items: ListingItem[]): Listing {
