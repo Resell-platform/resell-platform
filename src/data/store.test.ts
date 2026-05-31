@@ -282,13 +282,15 @@ describe("store state transitions", () => {
     expect(next).toBe(sellerReadyState);
   });
 
-  it("reserves an available listing once and prevents a second reservation", () => {
+  it("starts buyer conversations without locking the listing", () => {
     const first = reserveListing(seedState, "listing-1", "buyer-1");
     const second = reserveListing(first, "listing-1", "buyer-2");
+    const duplicate = reserveListing(second, "listing-1", "buyer-1");
 
-    expect(first.listings.find((listing) => listing.id === "listing-1")?.status).toBe("reserved");
+    expect(first.listings.find((listing) => listing.id === "listing-1")?.status).toBe("available");
     expect(first.reservations).toHaveLength(seedState.reservations.length + 1);
-    expect(second.reservations).toHaveLength(first.reservations.length);
+    expect(second.reservations).toHaveLength(first.reservations.length + 1);
+    expect(duplicate.reservations).toHaveLength(second.reservations.length);
   });
 
   it("lets a listing owner pause and resume an available listing", () => {
@@ -305,18 +307,19 @@ describe("store state transitions", () => {
     expect(next).toBe(seedState);
   });
 
-  it("prevents making a listing available while it has an active reservation", () => {
-    const next = updateListingStatus(seedState, "listing-2", "seller-1", "available");
+  it("lets sellers manage status while buyer conversations are active", () => {
+    const next = updateListingStatus(seedState, "listing-2", "seller-1", "paused");
 
-    expect(next).toBe(seedState);
-    expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("reserved");
+    expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("paused");
+    expect(next.reservations.find((reservation) => reservation.listingId === "listing-2")?.status).toBe(
+      "requested"
+    );
   });
 
-  it("treats reserved listings as reservation-managed", () => {
+  it("lets sellers mark a listing sold while preserving the buyer conversation", () => {
     const next = updateListingStatus(seedState, "listing-2", "seller-1", "sold");
 
-    expect(next).toBe(seedState);
-    expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("reserved");
+    expect(next.listings.find((listing) => listing.id === "listing-2")?.status).toBe("sold");
     expect(next.reservations.find((reservation) => reservation.listingId === "listing-2")?.status).toBe(
       "requested"
     );
@@ -373,20 +376,19 @@ describe("store state transitions", () => {
     expect(editedSold).toBe(sold);
   });
 
-  it("prevents editing reserved listing details", () => {
-    const copyOnly = updateListingDetails(seedState, "listing-2", "seller-1", {
+  it("lets owners edit listing details while buyer conversations are active", () => {
+    const edited = updateListingDetails(seedState, "listing-2", "seller-1", {
       ...draft,
       title: "Camera kit with extra battery",
       price: 520
     });
-    const priceChange = updateListingDetails(seedState, "listing-2", "seller-1", {
-      ...draft,
-      title: "Camera kit with price change",
-      price: 540
-    });
 
-    expect(copyOnly).toBe(seedState);
-    expect(priceChange).toBe(seedState);
+    expect(edited.listings.find((listing) => listing.id === "listing-2")?.title).toBe(
+      "Camera kit with extra battery"
+    );
+    expect(edited.reservations.find((reservation) => reservation.listingId === "listing-2")?.status).toBe(
+      "requested"
+    );
   });
 
   it("does not let a seller reserve their own listing", () => {

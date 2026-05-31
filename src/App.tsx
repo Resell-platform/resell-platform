@@ -736,6 +736,14 @@ export default function App() {
   }
 
   async function handleReserve(listingId: string) {
+    const findBuyerThread = (reservations: Reservation[], buyerId?: string) =>
+      reservations.find(
+        (item) =>
+          item.listingId === listingId &&
+          item.buyerId === buyerId &&
+          ACTIVE_RESERVATION_STATUSES.includes(item.status)
+      );
+
     if (dataSource === "cloudflare") {
       if (!sessionUser) {
         promptLogin(text.loginReserve);
@@ -745,7 +753,7 @@ export default function App() {
       const next = await runRemoteAction(() => reserveRemoteListing(listingId));
       const reservation = next.reservations.find(
         (item) => item.listingId === listingId && item.buyerId === sessionUser.id && !beforeIds.has(item.id)
-      );
+      ) ?? findBuyerThread(next.reservations, sessionUser.id);
       if (reservation) {
         setSelectedReservationId(reservation.id);
         setView("chat");
@@ -760,7 +768,7 @@ export default function App() {
           item.listingId === listingId &&
           item.buyerId === activeUser?.id &&
           !current.reservations.some((existing) => existing.id === item.id)
-      );
+      ) ?? findBuyerThread(next.reservations, activeUser?.id);
       if (reservation) {
         window.setTimeout(() => {
           setSelectedReservationId(reservation.id);
@@ -1494,153 +1502,184 @@ function BrowseView({
   locale: Locale;
 }) {
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+  const isNarrowLayout = useNarrowLayout();
   const activeFilterCount = getActiveBrowseFilterCount(filters);
   const filterToggleLabel =
     activeFilterCount > 0
       ? `${text.showFilters} (${activeFilterCount} ${text.activeFilters})`
       : text.showFilters;
+  const showFeed = !isNarrowLayout || !mobileDetailOpen;
+  const showDetail = Boolean(selectedListing) && (!isNarrowLayout || mobileDetailOpen);
+
+  useEffect(() => {
+    if (!isNarrowLayout) {
+      setMobileDetailOpen(false);
+    }
+  }, [isNarrowLayout]);
 
   return (
-    <section className="workspace two-column">
-      <div className="panel feed">
-        <div className="section-header">
-          <div>
-            <p className="eyebrow">{text.marketplace}</p>
-            <h1>{text.browseHeading}</h1>
+    <section
+      className={
+        mobileDetailOpen ? "workspace two-column browse-workspace mobile-detail-open" : "workspace two-column browse-workspace"
+      }
+    >
+      {showFeed && (
+        <div className="panel feed">
+          <div className="section-header">
+            <div>
+              <p className="eyebrow">{text.marketplace}</p>
+              <h1>{text.browseHeading}</h1>
+            </div>
+            <label className="search">
+              <Search size={18} />
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={text.searchListings}
+              />
+            </label>
           </div>
-          <label className="search">
-            <Search size={18} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text.searchListings} />
-          </label>
-        </div>
-        <div className="filter-toolbar">
-          <button
-            type="button"
-            className="secondary filter-toggle"
-            aria-expanded={filtersExpanded}
-            aria-controls="browse-filter-controls"
-            onClick={() => setFiltersExpanded((expanded) => !expanded)}
+          <div className="filter-toolbar">
+            <button
+              type="button"
+              className="secondary filter-toggle"
+              aria-expanded={filtersExpanded}
+              aria-controls="browse-filter-controls"
+              onClick={() => setFiltersExpanded((expanded) => !expanded)}
+            >
+              <Filter size={16} />
+              {filtersExpanded ? text.hideFilters : filterToggleLabel}
+            </button>
+          </div>
+          <div
+            id="browse-filter-controls"
+            className={filtersExpanded ? "browse-filters expanded" : "browse-filters"}
+            aria-label={text.browseFilters}
           >
-            <Filter size={16} />
-            {filtersExpanded ? text.hideFilters : filterToggleLabel}
-          </button>
-        </div>
-        <div
-          id="browse-filter-controls"
-          className={filtersExpanded ? "browse-filters expanded" : "browse-filters"}
-          aria-label={text.browseFilters}
-        >
-          <Filter className="filter-icon" size={18} />
-          <label>
-            <span>{text.category}</span>
-            <select
-              value={filters.category}
-              onChange={(event) => setFilters({ ...filters, category: event.target.value })}
-            >
-              <option value="all">{text.allCategories}</option>
-              {categories.map((category) => (
-                <option key={category} value={category}>
-                  {categoryLabel(category, locale)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>{text.condition}</span>
-            <select
-              value={filters.condition}
-              onChange={(event) => setFilters({ ...filters, condition: event.target.value })}
-            >
-              <option value="all">{text.allConditions}</option>
-              {["new", "like_new", "good", "fair"].map((condition) => (
-                <option key={condition} value={condition}>
-                  {statusLabel(condition, locale)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>{text.status}</span>
-            <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
-              <option value="all">{text.allStatuses}</option>
-              {["available", "reserved", "paused", "sold"].map((status) => (
-                <option key={status} value={status}>
-                  {statusLabel(status, locale)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>{text.minPrice}</span>
-            <input
-              type="number"
-              min="0"
-              inputMode="decimal"
-              value={filters.minPrice}
-              onChange={(event) => setFilters({ ...filters, minPrice: event.target.value })}
-            />
-          </label>
-          <label>
-            <span>{text.maxPrice}</span>
-            <input
-              type="number"
-              min="0"
-              inputMode="decimal"
-              value={filters.maxPrice}
-              onChange={(event) => setFilters({ ...filters, maxPrice: event.target.value })}
-            />
-          </label>
-          <label>
-            <span>{text.sortBy}</span>
-            <select
-              value={filters.sort}
-              onChange={(event) => setFilters({ ...filters, sort: event.target.value as BrowseSort })}
-            >
-              <option value="newest">{text.sortNewest}</option>
-              <option value="price_asc">{text.sortPriceLow}</option>
-              <option value="price_desc">{text.sortPriceHigh}</option>
-              <option value="title">{text.sortTitle}</option>
-            </select>
-          </label>
-          <button type="button" className="secondary" onClick={() => setFilters(DEFAULT_BROWSE_FILTERS)}>
-            <X size={16} />
-            {text.clearFilters}
-          </button>
-        </div>
-        <div className="listing-grid">
-          {listings.length === 0 && <p className="empty-state">{text.noFilteredListings}</p>}
-          {listings.map((listing) => {
-            const itemSummary = getListingItemSummary(listing);
-            return (
-              <button
-                key={listing.id}
-                className={selectedListing?.id === listing.id ? "listing-card selected" : "listing-card"}
-                onClick={() => selectListing(listing.id)}
+            <Filter className="filter-icon" size={18} />
+            <label>
+              <span>{text.category}</span>
+              <select
+                value={filters.category}
+                onChange={(event) => setFilters({ ...filters, category: event.target.value })}
               >
-                <img src={getPrimaryImage(listing)} alt="" />
-                <div>
-                  <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
-                  <h2>{listing.title}</h2>
-                  <p>${listing.price}</p>
-                  {itemSummary.length > 0 && (
-                    <>
-                      <span className="item-count">{getItemCountText(listing, text)}</span>
-                      <ul className="item-summary">
-                        {itemSummary.map((item) => (
-                          <li key={item.id}>{item.name}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+                <option value="all">{text.allCategories}</option>
+                {categories.map((category) => (
+                  <option key={category} value={category}>
+                    {categoryLabel(category, locale)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>{text.condition}</span>
+              <select
+                value={filters.condition}
+                onChange={(event) => setFilters({ ...filters, condition: event.target.value })}
+              >
+                <option value="all">{text.allConditions}</option>
+                {["new", "like_new", "good", "fair"].map((condition) => (
+                  <option key={condition} value={condition}>
+                    {statusLabel(condition, locale)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>{text.status}</span>
+              <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
+                <option value="all">{text.allStatuses}</option>
+                {["available", "reserved", "paused", "sold"].map((status) => (
+                  <option key={status} value={status}>
+                    {statusLabel(status, locale)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>{text.minPrice}</span>
+              <input
+                type="number"
+                min="0"
+                inputMode="decimal"
+                value={filters.minPrice}
+                onChange={(event) => setFilters({ ...filters, minPrice: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{text.maxPrice}</span>
+              <input
+                type="number"
+                min="0"
+                inputMode="decimal"
+                value={filters.maxPrice}
+                onChange={(event) => setFilters({ ...filters, maxPrice: event.target.value })}
+              />
+            </label>
+            <label>
+              <span>{text.sortBy}</span>
+              <select
+                value={filters.sort}
+                onChange={(event) => setFilters({ ...filters, sort: event.target.value as BrowseSort })}
+              >
+                <option value="newest">{text.sortNewest}</option>
+                <option value="price_asc">{text.sortPriceLow}</option>
+                <option value="price_desc">{text.sortPriceHigh}</option>
+                <option value="title">{text.sortTitle}</option>
+              </select>
+            </label>
+            <button type="button" className="secondary" onClick={() => setFilters(DEFAULT_BROWSE_FILTERS)}>
+              <X size={16} />
+              {text.clearFilters}
+            </button>
+          </div>
+          <div className="listing-grid">
+            {listings.length === 0 && <p className="empty-state">{text.noFilteredListings}</p>}
+            {listings.map((listing) => {
+              const itemSummary = getListingItemSummary(listing);
+              return (
+                <button
+                  key={listing.id}
+                  className={selectedListing?.id === listing.id ? "listing-card selected" : "listing-card"}
+                  onClick={() => {
+                    selectListing(listing.id);
+                    if (isNarrowLayout) {
+                      setMobileDetailOpen(true);
+                    }
+                  }}
+                >
+                  <img src={getPrimaryImage(listing)} alt="" />
+                  <div>
+                    <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
+                    <h2>{listing.title}</h2>
+                    <p>${listing.price}</p>
+                    {itemSummary.length > 0 && (
+                      <>
+                        <span className="item-count">{getItemCountText(listing, text)}</span>
+                        <ul className="item-summary">
+                          {itemSummary.map((item) => (
+                            <li key={item.id}>{item.name}</li>
+                          ))}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
-      {selectedListing && (
+      {showDetail && selectedListing && (
         <article className="panel detail">
+          {isNarrowLayout && (
+            <button type="button" className="secondary mobile-detail-back" onClick={() => setMobileDetailOpen(false)}>
+              <ChevronLeft size={18} />
+              {text.backToListings}
+            </button>
+          )}
           <ListingGallery listing={selectedListing} />
           <div className="detail-copy">
             <span className={`badge ${selectedListing.status}`}>{statusLabel(selectedListing.status, locale)}</span>
@@ -1667,7 +1706,10 @@ function BrowseView({
             </dl>
             <button
               className="primary sticky-cta"
-              disabled={selectedListing.status !== "available" || selectedListing.sellerId === activeUserId}
+              disabled={
+                (selectedListing.status !== "available" && selectedListing.status !== "reserved") ||
+                selectedListing.sellerId === activeUserId
+              }
               onClick={() => reserveListing(selectedListing.id)}
             >
               <ShoppingBag size={18} />
@@ -2067,7 +2109,6 @@ function SellView({
     editDraft &&
     editingListing &&
     editingListing.status !== "sold" &&
-    editingListing.status !== "reserved" &&
     editDraft.title.trim() &&
     editDraft.description.trim() &&
     editDraft.category.trim() &&
@@ -2112,7 +2153,7 @@ function SellView({
   }
 
   function startEditing(listing: Listing) {
-    if (listing.status === "sold" || listing.status === "reserved") return;
+    if (listing.status === "sold") return;
     setEditingId(listing.id);
     setEditDraft(listingToDraft(listing));
     setEditError("");
@@ -2283,7 +2324,7 @@ function SellView({
                   <select
                     aria-label={`Status for ${listing.title}`}
                     value={selectableStatus}
-                    disabled={Boolean(activeReservation) || isTerminal}
+                    disabled={isTerminal}
                     onChange={(event) =>
                       updateStatus(listing.id, event.target.value as Exclude<ListingStatus, "reserved">)
                     }
@@ -2301,7 +2342,7 @@ function SellView({
                 <button
                   type="button"
                   className="secondary"
-                  disabled={isTerminal || Boolean(activeReservation)}
+                  disabled={isTerminal}
                   onClick={() => startEditing(listing)}
                 >
                   {text.edit}
