@@ -332,6 +332,46 @@ function getListingDisplayItems(listing: Listing) {
   return listing.items.slice().sort((first, second) => first.position - second.position);
 }
 
+function getActiveBrowseFilterCount(filters: BrowseFilters) {
+  return [
+    filters.category !== DEFAULT_BROWSE_FILTERS.category,
+    filters.condition !== DEFAULT_BROWSE_FILTERS.condition,
+    filters.status !== DEFAULT_BROWSE_FILTERS.status,
+    filters.minPrice.trim() !== "",
+    filters.maxPrice.trim() !== "",
+    filters.sort !== DEFAULT_BROWSE_FILTERS.sort
+  ].filter(Boolean).length;
+}
+
+function isDraftItemComplete(item: ListingItem) {
+  return Boolean(
+    item.name.trim() &&
+      Number.isFinite(item.price) &&
+      Number(item.price) > 0 &&
+      item.condition
+  );
+}
+
+function useNarrowLayout() {
+  const [isNarrow, setIsNarrow] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mediaQuery = window.matchMedia("(max-width: 900px)");
+    const sync = () => setIsNarrow(mediaQuery.matches);
+
+    sync();
+    mediaQuery.addEventListener?.("change", sync);
+    mediaQuery.addListener?.(sync);
+    return () => {
+      mediaQuery.removeEventListener?.("change", sync);
+      mediaQuery.removeListener?.(sync);
+    };
+  }, []);
+
+  return isNarrow;
+}
+
 function hasPublishableItems(draft: ListingDraft) {
   const items = Array.isArray(draft.items) ? draft.items : [];
 
@@ -1453,6 +1493,13 @@ function BrowseView({
   text: Copy;
   locale: Locale;
 }) {
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const activeFilterCount = getActiveBrowseFilterCount(filters);
+  const filterToggleLabel =
+    activeFilterCount > 0
+      ? `${text.showFilters} (${activeFilterCount} ${text.activeFilters})`
+      : text.showFilters;
+
   return (
     <section className="workspace two-column">
       <div className="panel feed">
@@ -1466,8 +1513,24 @@ function BrowseView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text.searchListings} />
           </label>
         </div>
-        <div className="browse-filters" aria-label={text.browseFilters}>
-          <Filter size={18} />
+        <div className="filter-toolbar">
+          <button
+            type="button"
+            className="secondary filter-toggle"
+            aria-expanded={filtersExpanded}
+            aria-controls="browse-filter-controls"
+            onClick={() => setFiltersExpanded((expanded) => !expanded)}
+          >
+            <Filter size={16} />
+            {filtersExpanded ? text.hideFilters : filterToggleLabel}
+          </button>
+        </div>
+        <div
+          id="browse-filter-controls"
+          className={filtersExpanded ? "browse-filters expanded" : "browse-filters"}
+          aria-label={text.browseFilters}
+        >
+          <Filter className="filter-icon" size={18} />
           <label>
             <span>{text.category}</span>
             <select
@@ -1540,6 +1603,7 @@ function BrowseView({
             </select>
           </label>
           <button type="button" className="secondary" onClick={() => setFilters(DEFAULT_BROWSE_FILTERS)}>
+            <X size={16} />
             {text.clearFilters}
           </button>
         </div>
@@ -1588,26 +1652,7 @@ function BrowseView({
               if (displayItems.length === 0) return null;
 
               return (
-                <section className="detail-items">
-                  <div className="subsection-header">
-                    <div>
-                      <span>{text.postItems}</span>
-                      <p>{getItemCountText(selectedListing, text)}</p>
-                    </div>
-                  </div>
-                  {displayItems.map((item) => (
-                    <article className="detail-item" key={item.id}>
-                      <div>
-                        <strong>{item.name}</strong>
-                        {item.notes && <p>{item.notes}</p>}
-                      </div>
-                      <div className="detail-item-meta">
-                        {formatOptionalPrice(item.price) && <span>{formatOptionalPrice(item.price)}</span>}
-                        {item.condition && <span>{statusLabel(item.condition, locale)}</span>}
-                      </div>
-                    </article>
-                  ))}
-                </section>
+                <ListingDetailItems listing={selectedListing} items={displayItems} text={text} locale={locale} />
               );
             })()}
             <dl>
@@ -1634,6 +1679,64 @@ function BrowseView({
             </button>
           </div>
         </article>
+      )}
+    </section>
+  );
+}
+
+function ListingDetailItems({
+  listing,
+  items,
+  text,
+  locale
+}: {
+  listing: Listing;
+  items: ListingItem[];
+  text: Copy;
+  locale: Locale;
+}) {
+  const collapseItems = useNarrowLayout();
+  const [showAll, setShowAll] = useState(false);
+  const visibleItems = collapseItems && !showAll ? items.slice(0, 3) : items;
+  const hasHiddenItems = collapseItems && items.length > 3;
+  const itemsId = `detail-items-${listing.id}`;
+
+  useEffect(() => {
+    setShowAll(false);
+  }, [listing.id]);
+
+  return (
+    <section className="detail-items">
+      <div className="subsection-header">
+        <div>
+          <span>{text.postItems}</span>
+          <p>{getItemCountText(listing, text)}</p>
+        </div>
+      </div>
+      <div id={itemsId} className="detail-item-list">
+        {visibleItems.map((item) => (
+          <article className="detail-item" key={item.id}>
+            <div>
+              <strong>{item.name}</strong>
+              {item.notes && <p>{item.notes}</p>}
+            </div>
+            <div className="detail-item-meta">
+              {formatOptionalPrice(item.price) && <span>{formatOptionalPrice(item.price)}</span>}
+              {item.condition && <span>{statusLabel(item.condition, locale)}</span>}
+            </div>
+          </article>
+        ))}
+      </div>
+      {hasHiddenItems && (
+        <button
+          type="button"
+          className="ghost-inline item-list-toggle"
+          aria-expanded={showAll}
+          aria-controls={itemsId}
+          onClick={() => setShowAll((expanded) => !expanded)}
+        >
+          {showAll ? text.showFewerItems : text.showAllItems}
+        </button>
       )}
     </section>
   );
@@ -1667,6 +1770,8 @@ function ListingItemFields({
 }) {
   const items = Array.isArray(draft.items) ? draft.items : [];
   const canAddItem = items.length < MAX_LISTING_ITEMS;
+  const collapseCompletedItems = useNarrowLayout();
+  const [collapsedItemIds, setCollapsedItemIds] = useState<Set<string>>(() => new Set());
 
   function reindex(nextItems: ListingItem[]) {
     return nextItems.map((item, index) => ({ ...item, position: index }));
@@ -1687,12 +1792,30 @@ function ListingItemFields({
 
   function addItem() {
     if (!canAddItem) return;
-    onChange(syncDraftItems([...items, createBlankDraftItem(items.length, draft.condition)]));
+    const item = createBlankDraftItem(items.length, draft.condition);
+    onChange(syncDraftItems([...items, item]));
   }
 
   function removeItem(itemId: string) {
     const remaining = items.filter((item) => item.id !== itemId);
+    setCollapsedItemIds((current) => {
+      const next = new Set(current);
+      next.delete(itemId);
+      return next;
+    });
     onChange(syncDraftItems(remaining));
+  }
+
+  function toggleItem(itemId: string) {
+    setCollapsedItemIds((current) => {
+      const next = new Set(current);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
   }
 
   return (
@@ -1710,73 +1833,106 @@ function ListingItemFields({
           {text.addItem}
         </button>
       </div>
-      {items.map((item, index) => (
-        <div className="item-row" key={item.id}>
-          <div className="item-row-heading">
-            <strong>
-              {text.itemSingular} {index + 1}
-            </strong>
-            <button
-              type="button"
-              className="ghost-inline"
-              onClick={() => removeItem(item.id)}
-              disabled={items.length <= 1}
-            >
-              {text.removeItem}
-            </button>
-          </div>
-          <div className="field-grid">
-            <label>
-              <span>{text.itemName}</span>
-              <input
-                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemName} ${index + 1}`}
-                value={item.name}
-                onChange={(event) => updateItem(item.id, { name: event.target.value })}
-              />
-            </label>
-            <label>
-              <span>{text.itemPrice}</span>
-              <input
-                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemPrice} ${index + 1}`}
-                type="number"
-                min="1"
-                value={item.price ?? ""}
-                onChange={(event) =>
-                  updateItem(item.id, {
-                    price: event.target.value ? Number(event.target.value) : undefined
-                  })
-                }
-              />
-            </label>
-            <label>
-              <span>{text.itemCondition}</span>
-              <select
-                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemCondition} ${index + 1}`}
-                value={item.condition ?? ""}
-                onChange={(event) =>
-                  updateItem(item.id, {
-                    condition: event.target.value as ListingDraft["condition"]
-                  })
-                }
+      {items.map((item, index) => {
+        const complete = isDraftItemComplete(item);
+        const canCollapseItem = collapseCompletedItems && complete;
+        const collapsed = collapseCompletedItems && complete && collapsedItemIds.has(item.id);
+        const expanded = !collapsed;
+        const fieldsId = `item-fields-${item.id}`;
+        const summary = [
+          item.name.trim() || `${text.itemSingular} ${index + 1}`,
+          formatOptionalPrice(item.price),
+          item.condition ? statusLabel(item.condition, locale) : ""
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+        return (
+          <div className={expanded ? "item-row" : "item-row collapsed"} key={item.id}>
+            <div className="item-row-heading">
+              {canCollapseItem ? (
+                <button
+                  type="button"
+                  className="item-summary-button"
+                  aria-expanded={expanded}
+                  aria-controls={fieldsId}
+                  onClick={() => toggleItem(item.id)}
+                >
+                  <strong>
+                    {text.itemSingular} {index + 1}
+                  </strong>
+                  <span>{summary}</span>
+                </button>
+              ) : (
+                <div className="item-row-title">
+                  <strong>
+                    {text.itemSingular} {index + 1}
+                  </strong>
+                  <span>{complete ? summary : text.incompleteItem}</span>
+                </div>
+              )}
+              <button
+                type="button"
+                className="ghost-inline"
+                onClick={() => removeItem(item.id)}
+                disabled={items.length <= 1}
               >
-                {["new", "like_new", "good", "fair"].map((condition) => (
-                  <option key={condition} value={condition}>
-                    {statusLabel(condition, locale)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>{text.itemNotes}</span>
-              <input
-                aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemNotes} ${index + 1}`}
-                value={item.notes ?? ""}
-                onChange={(event) => updateItem(item.id, { notes: event.target.value })}
-              />
-            </label>
+                {text.removeItem}
+              </button>
+            </div>
+              <div className="field-grid item-row-fields" id={fieldsId} hidden={!expanded}>
+                <label>
+                  <span>{text.itemName}</span>
+                  <input
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemName} ${index + 1}`}
+                    value={item.name}
+                    onChange={(event) => updateItem(item.id, { name: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span>{text.itemPrice}</span>
+                  <input
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemPrice} ${index + 1}`}
+                    type="number"
+                    min="1"
+                    value={item.price ?? ""}
+                    onChange={(event) =>
+                      updateItem(item.id, {
+                        price: event.target.value ? Number(event.target.value) : undefined
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  <span>{text.itemCondition}</span>
+                  <select
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemCondition} ${index + 1}`}
+                    value={item.condition ?? ""}
+                    onChange={(event) =>
+                      updateItem(item.id, {
+                        condition: event.target.value as ListingDraft["condition"]
+                      })
+                    }
+                  >
+                    {["new", "like_new", "good", "fair"].map((condition) => (
+                      <option key={condition} value={condition}>
+                        {statusLabel(condition, locale)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>{text.itemNotes}</span>
+                  <input
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemNotes} ${index + 1}`}
+                    value={item.notes ?? ""}
+                    onChange={(event) => updateItem(item.id, { notes: event.target.value })}
+                  />
+                </label>
+              </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </section>
   );
 }
