@@ -1,5 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
-import { createListingInDb, readState, reserveListingInDb, updateReservationStatusInDb, type Env } from "./db";
+import {
+  createListingInDb,
+  readState,
+  reserveListingInDb,
+  updateReservationHandoffInDb,
+  updateReservationStatusInDb,
+  type Env
+} from "./db";
 import { MAX_LISTING_ITEMS, type ListingDraft } from "../../src/data/types";
 
 type FakeStatement = {
@@ -53,7 +60,21 @@ function createEnv(handlers: FakeDbHandlers = {}) {
         async first() {
           const result = handlers.first?.(statement);
           if (result !== undefined) return result;
-          if (sql.includes("FROM users")) return { id: "seller-1", role: "seller" };
+          if (sql.includes("FROM users")) {
+            return {
+              id: "seller-1",
+              role: "seller",
+              pickup_area: "Brooklyn",
+              pickup_zip: "11201",
+              service_area_miles: 10,
+              pickup_policy: "Brooklyn pickup.",
+              handoff_policy: "Confirm before meetup.",
+              cancellation_policy: "Cancel early when plans change.",
+              off_platform_instructions: "Coordinate in chat.",
+              response_expectation: "Replies within one day.",
+              seller_activated_at: "2026-05-23T10:00:00.000Z"
+            };
+          }
           return null;
         },
         async all() {
@@ -205,6 +226,34 @@ describe("Cloudflare listing persistence", () => {
     expect(noItems.batch).not.toHaveBeenCalled();
     expect(tooMany.batch).not.toHaveBeenCalled();
   });
+
+  it("requires seller setup before creating a listing", async () => {
+    const blocked = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM users")) return { id: "seller-1", role: "seller" };
+        return undefined;
+      }
+    });
+
+    await expect(
+      createListingInDb(
+        blocked.env,
+        "seller-1",
+        createDraft([
+          {
+            id: "item-1",
+            name: "Saucepan",
+            price: 35,
+            condition: "good",
+            notes: "Stainless steel",
+            position: 0,
+            createdAt: "2026-05-23T10:00:00.000Z"
+          }
+        ])
+      )
+    ).rejects.toThrow("Complete seller setup before publishing a listing.");
+    expect(blocked.batch).not.toHaveBeenCalled();
+  });
 });
 
 describe("Cloudflare reservation workflow", () => {
@@ -273,6 +322,103 @@ describe("Cloudflare reservation workflow", () => {
     expect(reservationUpdate.args[0]).toBe("sold");
     expect(notificationInsert.sql).toContain("Handoff complete");
     expect(notificationInsert.args[2]).toBe("The seller marked your reservation as complete.");
+  });
+
+  it("records cancellation reasons and restores listing availability", async () => {
+    const cancelled = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM reservations")) return createReservationRow();
+        if (statement.sql.includes("SELECT title FROM listings")) return { title: "Mirrorless camera kit" };
+        if (statement.sql.includes("SELECT name FROM users")) return { name: "Jordan Lee" };
+        return undefined;
+      }
+    });
+
+    await updateReservationStatusInDb(cancelled.env.DB, "reservation-1", "buyer-1", {
+      status: "cancelled",
+      reason: "Plans changed",
+      note: "Found another option.",
+      recoveryAction: "relist"
+    });
+
+    const batchCalls = cancelled.batch.mock.calls as unknown as [FakeStatement[]][];
+    const statements = batchCalls[0]?.[0] ?? [];
+    const reservationUpdate = statements.find((statement) => statement.sql.includes("cancelled_at"));
+    const listingUpdate = statements.find((statement) => statement.sql.includes("UPDATE listings SET status"));
+    const messageInsert = statements.find((statement) => statement.sql.includes("INSERT INTO messages"));
+    const notificationInsert = statements.find((statement) => statement.sql.includes("Reservation cancelled"));
+
+    expect(reservationUpdate?.args.slice(0, 6)).toEqual([
+      "cancelled",
+      expect.any(String),
+      "buyer-1",
+      "Plans changed",
+      "Found another option.",
+      "relisted"
+    ]);
+    expect(listingUpdate?.args[0]).toBe("available");
+    expect(String(messageInsert?.args[3])).toContain("Plans changed");
+    expect(notificationInsert?.sql).toContain("'reservation_cancelled'");
+  });
+
+  it("updates reservation handoff details and notifies the other participant", async () => {
+    const handoff = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM reservations")) return createReservationRow();
+        if (statement.sql.includes("SELECT title FROM listings")) return { title: "Mirrorless camera kit" };
+        if (statement.sql.includes("SELECT name FROM users")) return { name: "Jordan Lee" };
+        return undefined;
+      }
+    });
+
+    await updateReservationHandoffInDb(handoff.env.DB, "reservation-1", "buyer-1", {
+      handoffMethod: "pickup",
+      handoffWindow: "Saturday 2-4 PM",
+      handoffLocation: "Lobby entrance",
+      handoffNote: "Text when nearby.",
+      confirmBuyer: true
+    });
+
+    const batchCalls = handoff.batch.mock.calls as unknown as [FakeStatement[]][];
+    const statements = batchCalls[0]?.[0] ?? [];
+    const reservationUpdate = statements.find((statement) => statement.sql.includes("handoff_method"));
+    const notificationInsert = statements.find((statement) => statement.sql.includes("Handoff updated"));
+
+    expect(reservationUpdate?.args.slice(0, 5)).toEqual([
+      "pickup",
+      "Saturday 2-4 PM",
+      "Lobby entrance",
+      null,
+      "Text when nearby."
+    ]);
+    expect(reservationUpdate?.sql).toContain("status = 'payment_sent'");
+    expect(reservationUpdate?.args[5]).toEqual(expect.any(String));
+    expect(notificationInsert?.args[1]).toBe("seller-1");
+  });
+
+  it("rejects incomplete reservation handoff details", async () => {
+    const handoff = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM reservations")) return createReservationRow();
+        return undefined;
+      }
+    });
+
+    await expect(
+      updateReservationHandoffInDb(handoff.env.DB, "reservation-1", "buyer-1", {
+        handoffMethod: "pickup",
+        handoffWindow: "",
+        handoffLocation: "Lobby entrance"
+      })
+    ).rejects.toThrow("Handoff window and pickup or shipping details are required.");
+    await expect(
+      updateReservationHandoffInDb(handoff.env.DB, "reservation-1", "buyer-1", {
+        handoffMethod: "shipping",
+        handoffWindow: "Saturday",
+        handoffTracking: ""
+      })
+    ).rejects.toThrow("Handoff window and pickup or shipping details are required.");
+    expect(handoff.batch).not.toHaveBeenCalled();
   });
 
   it("expires active holds with hold language through the D1 read path", async () => {

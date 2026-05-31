@@ -35,6 +35,15 @@ type UserRow = {
   email_verified_at?: string | null;
   phone_verified_at?: string | null;
   pickup_area?: string | null;
+  pickup_zip?: string | null;
+  service_area_miles?: number | null;
+  pickup_policy?: string | null;
+  handoff_policy?: string | null;
+  cancellation_policy?: string | null;
+  off_platform_instructions?: string | null;
+  response_expectation?: string | null;
+  seller_activated_at?: string | null;
+  email_notifications_enabled?: number | null;
   bio?: string | null;
   avatar_url?: string | null;
 };
@@ -82,6 +91,18 @@ type ReservationRow = {
   status: ReservationStatus;
   payment_due_at: string;
   overdue_notified_at?: string | null;
+  cancelled_at?: string | null;
+  cancelled_by_user_id?: string | null;
+  cancellation_reason?: string | null;
+  cancellation_note?: string | null;
+  recovery_state?: Reservation["recoveryState"] | null;
+  handoff_method?: Reservation["handoffMethod"] | null;
+  handoff_window?: string | null;
+  handoff_location?: string | null;
+  handoff_tracking?: string | null;
+  handoff_note?: string | null;
+  buyer_confirmed_at?: string | null;
+  seller_confirmed_at?: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -102,7 +123,25 @@ type NotificationRow = {
   body: string;
   entity_id?: string | null;
   read_at?: string | null;
+  dedupe_key?: string | null;
   created_at: string;
+};
+
+export type ReservationStatusUpdate = {
+  status: ReservationStatus;
+  reason?: string;
+  note?: string;
+  recoveryAction?: "relist" | "pause";
+};
+
+export type ReservationHandoffDraft = {
+  handoffMethod?: Reservation["handoffMethod"];
+  handoffWindow?: string;
+  handoffLocation?: string;
+  handoffTracking?: string;
+  handoffNote?: string;
+  confirmBuyer?: boolean;
+  confirmSeller?: boolean;
 };
 
 export type SendMessageResult = {
@@ -125,7 +164,10 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
   const [users, listings, images, items] = await Promise.all([
     db
       .prepare(
-        `SELECT id, name, role, email_verified_at, phone_verified_at, pickup_area, bio, avatar_url
+        `SELECT id, name, role, email_verified_at, phone_verified_at, pickup_area, pickup_zip,
+                service_area_miles, pickup_policy, handoff_policy, cancellation_policy,
+                off_platform_instructions, response_expectation, seller_activated_at,
+                email_notifications_enabled, bio, avatar_url
          FROM users
          ORDER BY created_at, name`
       )
@@ -200,6 +242,15 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
       emailVerifiedAt: row.email_verified_at ?? undefined,
       phoneVerifiedAt: row.phone_verified_at ?? undefined,
       pickupArea: row.pickup_area ?? undefined,
+      pickupZip: row.pickup_zip ?? undefined,
+      serviceAreaMiles: row.service_area_miles ?? undefined,
+      pickupPolicy: row.pickup_policy ?? undefined,
+      handoffPolicy: row.handoff_policy ?? undefined,
+      cancellationPolicy: row.cancellation_policy ?? undefined,
+      offPlatformInstructions: row.off_platform_instructions ?? undefined,
+      responseExpectation: row.response_expectation ?? undefined,
+      sellerActivatedAt: row.seller_activated_at ?? undefined,
+      emailNotificationsEnabled: row.email_notifications_enabled !== 0,
       bio: row.bio ?? undefined,
       avatarUrl: row.avatar_url ?? undefined
     })),
@@ -215,6 +266,18 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
       status: row.status,
       paymentDueAt: row.payment_due_at,
       overdueNotifiedAt: row.overdue_notified_at ?? undefined,
+      cancelledAt: row.cancelled_at ?? undefined,
+      cancelledByUserId: row.cancelled_by_user_id ?? undefined,
+      cancellationReason: row.cancellation_reason ?? undefined,
+      cancellationNote: row.cancellation_note ?? undefined,
+      recoveryState: row.recovery_state ?? undefined,
+      handoffMethod: row.handoff_method ?? undefined,
+      handoffWindow: row.handoff_window ?? undefined,
+      handoffLocation: row.handoff_location ?? undefined,
+      handoffTracking: row.handoff_tracking ?? undefined,
+      handoffNote: row.handoff_note ?? undefined,
+      buyerConfirmedAt: row.buyer_confirmed_at ?? undefined,
+      sellerConfirmedAt: row.seller_confirmed_at ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at
     })),
@@ -233,6 +296,7 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
       body: row.body,
       entityId: row.entity_id ?? undefined,
       readAt: row.read_at ?? undefined,
+      dedupeKey: row.dedupe_key ?? undefined,
       createdAt: row.created_at
     }))
   };
@@ -240,9 +304,20 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
 
 export async function createListingInDb(env: Env, sellerId: string, draft: ListingDraft) {
   const db = env.DB;
-  const seller = await db.prepare("SELECT id, role FROM users WHERE id = ?").bind(sellerId).first<UserRow>();
+  const seller = await db
+    .prepare(
+      `SELECT id, role, pickup_zip, service_area_miles, pickup_policy, handoff_policy,
+              pickup_area, off_platform_instructions, cancellation_policy, response_expectation, seller_activated_at
+       FROM users
+       WHERE id = ?`
+    )
+    .bind(sellerId)
+    .first<UserRow>();
   if (!seller) {
     throw new ApiError("Log in to create listings.", 401);
+  }
+  if (!isSellerReady(seller)) {
+    throw new ApiError("Complete seller setup before publishing a listing.", 403);
   }
   validateListingDraft(draft);
 
@@ -555,8 +630,9 @@ export async function updateReservationStatusInDb(
   db: D1Database,
   reservationId: string,
   actorId: string,
-  status: ReservationStatus
+  update: ReservationStatus | ReservationStatusUpdate
 ) {
+  const status = typeof update === "string" ? update : update.status;
   const reservation = await getReservationForParticipant(db, reservationId, actorId);
   if (TERMINAL_RESERVATION_STATUSES.has(reservation.status)) {
     throw new ApiError("Terminal reservations cannot be changed.", 409);
@@ -569,13 +645,14 @@ export async function updateReservationStatusInDb(
   }
 
   const now = new Date().toISOString();
-  const statements = [
-    db
-      .prepare("UPDATE reservations SET status = ?, updated_at = ? WHERE id = ?")
-      .bind(status, now, reservationId)
-  ];
+  const statements: D1PreparedStatement[] = [];
 
   if (status === "sold") {
+    statements.push(
+      db
+        .prepare("UPDATE reservations SET status = ?, seller_confirmed_at = COALESCE(seller_confirmed_at, ?), updated_at = ? WHERE id = ?")
+        .bind(status, now, now, reservationId)
+    );
     statements.push(
       db
         .prepare("UPDATE listings SET status = 'sold', updated_at = ? WHERE id = ?")
@@ -598,14 +675,124 @@ export async function updateReservationStatusInDb(
   }
 
   if (status === "cancelled") {
+    const details: Partial<ReservationStatusUpdate> = typeof update === "string" ? {} : update;
+    const reason = normalizeCancellationReason(details.reason);
+    const note = details.note?.trim() ?? "";
+    const listingStatus = details.recoveryAction === "pause" ? "paused" : "available";
+    const recoveryState = listingStatus === "available" ? "relisted" : "closed";
+    const receiverId = reservation.seller_id === actorId ? reservation.buyer_id : reservation.seller_id;
+    const [listingTitle, actorName] = await Promise.all([
+      getListingTitle(db, reservation.listing_id),
+      getUserName(db, actorId)
+    ]);
+    const notificationBody = `${actorName} cancelled the reservation for ${listingTitle}: ${formatCancellationReason(
+      reason
+    )}.`;
     statements.push(
       db
-        .prepare("UPDATE listings SET status = 'available', updated_at = ? WHERE id = ?")
-        .bind(now, reservation.listing_id)
+        .prepare(
+          `UPDATE reservations
+           SET status = ?,
+               cancelled_at = ?,
+               cancelled_by_user_id = ?,
+               cancellation_reason = ?,
+               cancellation_note = ?,
+               recovery_state = ?,
+               updated_at = ?
+           WHERE id = ?`
+        )
+        .bind(status, now, actorId, reason, note || null, recoveryState, now, reservationId)
+    );
+    statements.push(
+      db
+        .prepare("UPDATE listings SET status = ?, updated_at = ? WHERE id = ?")
+        .bind(listingStatus, now, reservation.listing_id)
+    );
+    statements.push(
+      db
+        .prepare("INSERT INTO messages (id, reservation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)")
+        .bind(createId("message"), reservationId, actorId, notificationBody, now)
+    );
+    statements.push(
+      db
+        .prepare(
+          `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
+           VALUES (?, ?, 'reservation_cancelled', 'Reservation cancelled', ?, ?, ?)`
+        )
+        .bind(createId("notification"), receiverId, notificationBody, reservationId, now)
     );
   }
 
   await db.batch(statements);
+}
+
+export async function updateReservationHandoffInDb(
+  db: D1Database,
+  reservationId: string,
+  actorId: string,
+  draft: ReservationHandoffDraft
+) {
+  const reservation = await getReservationForParticipant(db, reservationId, actorId);
+  if (TERMINAL_RESERVATION_STATUSES.has(reservation.status)) {
+    throw new ApiError("Terminal reservations cannot be changed.", 409);
+  }
+  const method = normalizeHandoffMethod(draft.handoffMethod);
+  const now = new Date().toISOString();
+  const handoffWindow = draft.handoffWindow?.trim() ?? "";
+  const handoffLocation = draft.handoffLocation?.trim() ?? "";
+  const handoffTracking = draft.handoffTracking?.trim() ?? "";
+  const handoffNote = draft.handoffNote?.trim() ?? "";
+  const primaryDetail = method === "shipping" ? handoffTracking : handoffLocation;
+  if (!handoffWindow || !primaryDetail) {
+    throw new ApiError("Handoff window and pickup or shipping details are required.", 400);
+  }
+  const buyerConfirmedAt =
+    draft.confirmBuyer && actorId === reservation.buyer_id ? now : reservation.buyer_confirmed_at ?? null;
+  const sellerConfirmedAt =
+    draft.confirmSeller && actorId === reservation.seller_id ? now : reservation.seller_confirmed_at ?? null;
+  const receiverId = reservation.seller_id === actorId ? reservation.buyer_id : reservation.seller_id;
+  const [listingTitle, actorName] = await Promise.all([
+    getListingTitle(db, reservation.listing_id),
+    getUserName(db, actorId)
+  ]);
+  const summary = `${actorName} updated handoff details for ${listingTitle}.`;
+
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE reservations
+         SET status = 'payment_sent',
+             handoff_method = ?,
+             handoff_window = ?,
+             handoff_location = ?,
+             handoff_tracking = ?,
+             handoff_note = ?,
+             buyer_confirmed_at = ?,
+             seller_confirmed_at = ?,
+             updated_at = ?
+         WHERE id = ?`
+      )
+      .bind(
+        method,
+        handoffWindow || null,
+        handoffLocation || null,
+        handoffTracking || null,
+        handoffNote || null,
+        buyerConfirmedAt,
+        sellerConfirmedAt,
+        now,
+        reservationId
+      ),
+    db
+      .prepare("INSERT INTO messages (id, reservation_id, sender_id, body, created_at) VALUES (?, ?, ?, ?, ?)")
+      .bind(createId("message"), reservationId, actorId, summary, now),
+    db
+      .prepare(
+        `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
+         VALUES (?, ?, 'message_received', 'Handoff updated', ?, ?, ?)`
+      )
+      .bind(createId("notification"), receiverId, summary, reservationId, now)
+  ]);
 }
 
 export async function markNotificationsReadInDb(db: D1Database, userId: string) {
@@ -645,26 +832,30 @@ async function markExpiredReservationHolds(db: D1Database) {
     await db.batch([
       db
         .prepare(
-          `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-           VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?)`
+          `INSERT OR IGNORE INTO notifications (
+             id, user_id, type, title, body, entity_id, dedupe_key, created_at
+           ) VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?, ?)`
         )
         .bind(
           createId("notification"),
           reservation.buyer_id,
           `The hold expired for ${reservation.title}.`,
           reservation.id,
+          `reservation:${reservation.id}:hold_expired:buyer`,
           now
         ),
       db
         .prepare(
-          `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-           VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?)`
+          `INSERT OR IGNORE INTO notifications (
+             id, user_id, type, title, body, entity_id, dedupe_key, created_at
+           ) VALUES (?, ?, 'payment_overdue', 'Hold expired', ?, ?, ?, ?)`
         )
         .bind(
           createId("notification"),
           reservation.seller_id,
           `${reservation.buyer_name} still has an expired hold for ${reservation.title}.`,
           reservation.id,
+          `reservation:${reservation.id}:hold_expired:seller`,
           now
         )
     ]);
@@ -683,6 +874,53 @@ async function getReservationForParticipant(db: D1Database, reservationId: strin
 async function getUserName(db: D1Database, userId: string) {
   const user = await db.prepare("SELECT name FROM users WHERE id = ?").bind(userId).first<{ name: string }>();
   return user?.name ?? "Someone";
+}
+
+async function getListingTitle(db: D1Database, listingId: string) {
+  const listing = await db.prepare("SELECT title FROM listings WHERE id = ?").bind(listingId).first<{ title: string }>();
+  return listing?.title ?? "a listing";
+}
+
+function normalizeCancellationReason(reason?: string) {
+  const normalized = reason?.trim() ?? "";
+  if (
+    [
+      "buyer_changed_mind",
+      "buyer_unreachable",
+      "seller_unavailable",
+      "handoff_timing_failed",
+      "listing_unavailable",
+      "other"
+    ].includes(normalized)
+  ) {
+    return normalized;
+  }
+  return normalized || "other";
+}
+
+function formatCancellationReason(reason: string) {
+  const labels: Record<string, string> = {
+    buyer_changed_mind: "Buyer no longer wants it",
+    buyer_unreachable: "Buyer unreachable",
+    seller_unavailable: "Seller unavailable",
+    handoff_timing_failed: "Handoff timing failed",
+    listing_unavailable: "Listing unavailable or damaged",
+    other: "Other"
+  };
+  return labels[reason] ?? reason;
+}
+
+function normalizeHandoffMethod(method?: Reservation["handoffMethod"]) {
+  return method === "shipping" ? "shipping" : "pickup";
+}
+
+function isSellerReady(seller: UserRow) {
+  return Boolean(
+    seller.pickup_area?.trim() &&
+      seller.off_platform_instructions?.trim() &&
+      seller.cancellation_policy?.trim() &&
+      seller.response_expectation?.trim()
+  );
 }
 
 function normalizeListingFromRow(row: ListingRow, images: ListingImage[], items: ListingItem[]): Listing {

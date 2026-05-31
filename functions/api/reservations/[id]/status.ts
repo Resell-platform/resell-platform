@@ -5,12 +5,15 @@ import type { ReservationStatus } from "../../../../src/data/types";
 
 type UpdateReservationStatusBody = {
   status: ReservationStatus;
+  reason?: string;
+  note?: string;
+  recoveryAction?: "relist" | "pause";
 };
 
 export const onRequestPost: PagesFunction<Env> = async ({ env, params, request }) =>
   handleApi(async () => {
     const user = await requireCurrentUser(request, env);
     const body = await readJson<UpdateReservationStatusBody>(request);
-    await updateReservationStatusInDb(env.DB, String(params.id), user.id, body.status);
+    await updateReservationStatusInDb(env.DB, String(params.id), user.id, body);
     return jsonResponse(await readState(env.DB, user));
   });

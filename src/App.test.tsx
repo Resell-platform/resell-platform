@@ -21,6 +21,17 @@ function installLocalStorage() {
   });
 }
 
+function fillSellerSetup() {
+  fireEvent.change(screen.getByLabelText(/pickup area/i), { target: { value: "Brooklyn" } });
+  fireEvent.change(screen.getByLabelText(/response expectation/i), { target: { value: "Replies within 24 hours" } });
+  fireEvent.change(screen.getByLabelText(/off-platform instructions/i), {
+    target: { value: "Share phone details only after both sides confirm in chat." }
+  });
+  fireEvent.change(screen.getByLabelText(/cancellation and handoff policy/i), {
+    target: { value: "Cancel before the handoff window if plans change." }
+  });
+}
+
 describe("App user flows", () => {
   let webSocketMock: ReturnType<typeof installWebSocketMock>;
 
@@ -38,6 +49,7 @@ describe("App user flows", () => {
     const { container } = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fillSellerSetup();
     const imageInput = screen.getByLabelText(/images/i);
     const files = [
       new File(["first"], "first.png", { type: "image/png" }),
@@ -94,6 +106,7 @@ describe("App user flows", () => {
     const { container } = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fillSellerSetup();
     fireEvent.change(screen.getByLabelText(/images/i), {
       target: { files: [new File(["bundle"], "bundle.png", { type: "image/png" })] }
     });
@@ -165,6 +178,63 @@ describe("App user flows", () => {
     expect(screen.getAllByText("Kitchen item 4")).toHaveLength(1);
   });
 
+  it("filters and sorts browse listings on the client", () => {
+    const { container } = render(<App />);
+
+    fireEvent.change(screen.getByLabelText(/category/i), { target: { value: "Electronics" } });
+
+    expect(screen.getAllByText("Mirrorless camera kit")).not.toHaveLength(0);
+    expect(screen.queryByText("Walnut writing desk")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    fireEvent.change(screen.getByLabelText(/min price/i), { target: { value: "300" } });
+
+    expect(screen.getAllByText("Mirrorless camera kit")).not.toHaveLength(0);
+    expect(screen.queryByText("Walnut writing desk")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/max price/i), { target: { value: "10" } });
+
+    expect(screen.getByText(/no listings match these filters/i)).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Mirrorless camera kit" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    fireEvent.change(screen.getByLabelText(/sort by/i), { target: { value: "price_desc" } });
+
+    const cardTitles = Array.from(container.querySelectorAll(".listing-card h2")).map((node) => node.textContent);
+    expect(cardTitles[0]).toBe("Mirrorless camera kit");
+  });
+
+  it("saves a structured handoff plan from a reservation", () => {
+    const { container } = render(<App />);
+
+    fireEvent.change(screen.getAllByLabelText(/demo user/i)[0], { target: { value: "buyer-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /reservations/i }));
+    fireEvent.change(screen.getByLabelText(/window/i), { target: { value: "Saturday 2-4 PM" } });
+    fireEvent.change(screen.getByLabelText(/location/i), { target: { value: "Lobby entrance" } });
+    fireEvent.change(screen.getByLabelText(/note/i), { target: { value: "Text when nearby." } });
+    fireEvent.click(screen.getByRole("button", { name: /save handoff plan/i }));
+
+    expect(screen.getByText("Saturday 2-4 PM")).toBeInTheDocument();
+    expect(screen.getByText("Lobby entrance")).toBeInTheDocument();
+    expect(screen.getAllByText("Text when nearby.").length).toBeGreaterThan(0);
+    expect(screen.getByText(/handoff planned/i)).toBeInTheDocument();
+  });
+
+  it("requires a cancellation reason before cancelling a buyer reservation", () => {
+    const { container } = render(<App />);
+
+    fireEvent.change(screen.getAllByLabelText(/demo user/i)[0], { target: { value: "buyer-1" } });
+    fireEvent.click(screen.getByRole("button", { name: /reservations/i }));
+    fireEvent.click(screen.getByRole("button", { name: /cancel reservation/i }));
+    expect(screen.getByRole("button", { name: /confirm cancellation/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/cancellation reason/i), { target: { value: "Plans changed" } });
+    fireEvent.click(screen.getByRole("button", { name: /confirm cancellation/i }));
+
+    expect(screen.getByText(/plans changed/i)).toBeInTheDocument();
+    expect(screen.getByText(/cancelled/i)).toBeInTheDocument();
+  });
+
   it("creates a chat message from the rendered composer and clears the input", () => {
     render(<App />);
 
@@ -234,6 +304,7 @@ describe("App user flows", () => {
     const { container } = render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fillSellerSetup();
     fireEvent.change(screen.getByLabelText(/images/i), {
       target: { files: [new File(["mobile"], "mobile.png", { type: "image/png" })] }
     });
@@ -379,7 +450,7 @@ describe("App user flows", () => {
     expect(screen.queryByText(/buyer jordan lee/i)).not.toBeInTheDocument();
   });
 
-  it("lets the local seller cancel a reserved listing from My listings", () => {
+  it("lets the local seller cancel a reserved listing from My listings", async () => {
     render(<App />);
 
     fireEvent.click(screen.getByRole("button", { name: /sell/i }));
@@ -387,8 +458,12 @@ describe("App user flows", () => {
     expect(cameraRow).not.toBeNull();
 
     fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /^cancel$/i }));
+    fireEvent.change(screen.getByLabelText(/cancellation reason/i), { target: { value: "Plans changed" } });
+    fireEvent.click(screen.getByRole("button", { name: /confirm cancellation/i }));
 
-    expect(screen.getByLabelText(/status for mirrorless camera kit/i)).toHaveValue("available");
+    await waitFor(() => {
+      expect(screen.getByLabelText(/status for mirrorless camera kit/i)).toHaveValue("available");
+    });
     expect(screen.queryByText(/buyer jordan lee/i)).not.toBeInTheDocument();
   });
 
@@ -478,6 +553,61 @@ describe("App user flows", () => {
         expect.objectContaining({
           method: "PATCH",
           body: expect.stringContaining("Walnut writing desk with riser")
+        })
+      );
+    });
+  });
+
+  it("saves Cloudflare seller setup before publishing a first listing", async () => {
+    const firstTimeSeller = {
+      ...seedState.users[0],
+      pickupArea: "",
+      offPlatformInstructions: "",
+      responseExpectation: "",
+      cancellationPolicy: "",
+      sellerActivatedAt: undefined
+    };
+    const fetchMock = mockCloudflareSession(firstTimeSeller, cloudflarePublicState(firstTimeSeller));
+
+    const { container } = render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fillSellerSetup();
+    fireEvent.change(screen.getByLabelText(/images/i), {
+      target: { files: [new File(["chair"], "chair.png", { type: "image/png" })] }
+    });
+    await waitFor(() => {
+      expect(container.querySelectorAll(".upload-strip img")).toHaveLength(1);
+    });
+    fireEvent.change(screen.getByLabelText(/title/i), { target: { value: "Reading chair" } });
+    fireEvent.change(screen.getByLabelText(/pickup or shipping notes/i), {
+      target: { value: "Pickup near Prospect Park" }
+    });
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Comfortable accent chair with clean fabric." }
+    });
+    fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Accent chair" } });
+    fireEvent.change(screen.getByLabelText(/item price 1/i), { target: { value: "85" } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /publish listing/i })).not.toBeDisabled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /publish listing/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/me",
+        expect.objectContaining({
+          method: "PATCH",
+          body: expect.stringContaining("Share phone details only after both sides confirm in chat.")
+        })
+      );
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/listings",
+        expect.objectContaining({
+          method: "POST",
+          body: expect.stringContaining("Reading chair")
         })
       );
     });
@@ -644,6 +774,9 @@ describe("App user flows", () => {
 function mockCloudflareSession(user: User | null, state: AppState = cloudflarePublicState(user)) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    if (path.endsWith("/api/me") && init?.method === "PATCH") {
+      return jsonResponse({ user, state });
+    }
     if (path.endsWith("/api/me")) {
       return jsonResponse({ user });
     }
@@ -669,7 +802,13 @@ function mockCloudflareSession(user: User | null, state: AppState = cloudflarePu
     if (path.includes("/api/listings/") && init?.method === "PATCH") {
       return jsonResponse(state);
     }
+    if (path.endsWith("/api/listings") && init?.method === "POST") {
+      return jsonResponse(state);
+    }
     if (path.includes("/api/reservations/") && path.endsWith("/status") && init?.method === "POST") {
+      return jsonResponse(state);
+    }
+    if (path.includes("/api/reservations/") && init?.method === "PATCH") {
       return jsonResponse(state);
     }
     return jsonResponse({ error: "Unexpected test request" }, 500);

@@ -2,6 +2,14 @@ name = "resell-platform-realtime"
 main = "src/index.ts"
 compatibility_date = "2026-05-23"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "resell-platform-db"
+database_id = "c98b0503-52e1-4cac-ba21-fede0bb57d78"
+
+[triggers]
+crons = ["*/5 * * * *"]
+
 [[durable_objects.bindings]]
 name = "CHAT_USER_HUB"
 class_name = "ChatUserHub"

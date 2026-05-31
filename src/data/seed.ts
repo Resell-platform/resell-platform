@@ -6,7 +6,20 @@ const futureDue = new Date(now.getTime() + 21 * 60 * 60 * 1000).toISOString();
 
 export const seedState: AppState = {
   users: [
-    { id: "seller-1", name: "Avery Chen", role: "seller" },
+    {
+      id: "seller-1",
+      name: "Avery Chen",
+      role: "seller",
+      pickupArea: "Brooklyn, NY",
+      pickupZip: "11201",
+      serviceAreaMiles: 10,
+      pickupPolicy: "Pickup in Brooklyn or nearby meetup by agreement.",
+      handoffPolicy: "Use reservation chat to confirm the handoff window before meeting.",
+      cancellationPolicy: "Please cancel early if timing changes so the listing can reopen.",
+      offPlatformInstructions: "Agree on handoff details directly in chat.",
+      responseExpectation: "Usually replies within one day.",
+      sellerActivatedAt: now.toISOString()
+    },
     { id: "buyer-1", name: "Jordan Lee", role: "buyer" },
     { id: "buyer-2", name: "Mina Patel", role: "buyer" }
   ],

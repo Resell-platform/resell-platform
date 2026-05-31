@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
+  CalendarClock,
   ChevronLeft,
   ChevronRight,
   CheckCircle2,
   Download,
+  Filter,
   ImagePlus,
   Menu,
   MessageSquare,
@@ -13,13 +15,17 @@ import {
   Search,
   Share2,
   ShoppingBag,
+  Truck,
   Upload,
-  UserRound
+  UserRound,
+  X
 } from "lucide-react";
 import {
+  cancelReservation,
   computeHoldExpirationNotifications,
   createId,
   createListing,
+  getSellerSetup,
   getPrimaryImage,
   getUserName,
   loadState,
@@ -29,8 +35,11 @@ import {
   sendMessage,
   updateListingDetails,
   updateListingStatus,
+  updateReservationHandoffPlan,
+  updateSellerSetup,
   updateReservationStatus
 } from "./data/store";
+import type { HandoffPlanDraft, SellerSetupDraft } from "./data/store";
 import {
   createRemoteListing,
   connectRealtimeSocket,
@@ -42,6 +51,8 @@ import {
   sendRemoteMessage,
   updateRemoteListing,
   updateRemoteListingStatus,
+  updateRemoteProfile,
+  updateRemoteReservationHandoff,
   updateRemoteReservationStatus,
   type ExportArchive,
   type RealtimeEvent
@@ -67,6 +78,15 @@ import {
 } from "./platform/adapters";
 
 type View = "browse" | "sell" | "orders" | "chat" | "notifications";
+type BrowseSort = "newest" | "price_asc" | "price_desc" | "title";
+type BrowseFilters = {
+  category: string;
+  condition: string;
+  status: string;
+  minPrice: string;
+  maxPrice: string;
+  sort: BrowseSort;
+};
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
   "requested",
@@ -75,6 +95,14 @@ const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
   "overdue"
 ];
 const TERMINAL_RESERVATION_STATUSES = new Set<Reservation["status"]>(["paid", "sold", "cancelled"]);
+const DEFAULT_BROWSE_FILTERS: BrowseFilters = {
+  category: "all",
+  condition: "all",
+  status: "all",
+  minPrice: "",
+  maxPrice: "",
+  sort: "newest"
+};
 
 const platformAdapters = createWebPlatformAdapters();
 
@@ -320,6 +348,43 @@ function hasPublishableItems(draft: ListingDraft) {
   );
 }
 
+type ReservationCoordination = Reservation & {
+  handoffPlan?: HandoffPlanDraft & {
+    updatedAt?: string;
+    updatedById?: string;
+  };
+  cancelledById?: string;
+};
+
+function getReservationHandoffPlan(reservation: Reservation) {
+  const localPlan = (reservation as ReservationCoordination).handoffPlan;
+  if (localPlan) return localPlan;
+  const mode = reservation.handoffMethod ?? (reservation.handoffTracking ? "shipping" : "pickup");
+  const locationOrTracking =
+    mode === "shipping"
+      ? reservation.handoffTracking ?? reservation.handoffLocation
+      : reservation.handoffLocation ?? reservation.handoffTracking;
+  if (!reservation.handoffMethod && !reservation.handoffWindow && !locationOrTracking && !reservation.handoffNote) {
+    return undefined;
+  }
+  return {
+    mode,
+    window: reservation.handoffWindow ?? "",
+    locationOrTracking: locationOrTracking ?? "",
+    note: reservation.handoffNote,
+    updatedAt: reservation.updatedAt
+  };
+}
+
+function getReservationCancellation(reservation: Reservation) {
+  const coordinated = reservation as ReservationCoordination;
+  return {
+    reason: reservation.cancellationReason,
+    cancelledById: coordinated.cancelledById ?? reservation.cancelledByUserId,
+    cancelledAt: reservation.cancelledAt
+  };
+}
+
 export default function App() {
   const allowLocalFallback = import.meta.env.DEV;
   const [locale, setLocale] = useState<Locale>(getInitialLocale);
@@ -338,6 +403,8 @@ export default function App() {
   const [selectedListingId, setSelectedListingId] = useState<string | null>("listing-1");
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>("reservation-1");
   const [query, setQuery] = useState("");
+  const [browseFilters, setBrowseFilters] = useState<BrowseFilters>(DEFAULT_BROWSE_FILTERS);
+  const [cancellationRequestId, setCancellationRequestId] = useState<string | null>(null);
   const realtimeSocketRef = useRef<WebSocket | null>(null);
   const text = copy[locale];
 
@@ -533,20 +600,41 @@ export default function App() {
     dataSource === "cloudflare"
       ? sessionUser
       : state.users.find((user) => user.id === state.activeUserId) ?? state.users[0];
-  const selectedListing = state.listings.find((listing) => listing.id === selectedListingId) ?? state.listings[0];
+  const listingCategories = useMemo(
+    () => Array.from(new Set(state.listings.map((listing) => listing.category))).sort(),
+    [state.listings]
+  );
   const visibleListings = useMemo(() => {
     const normalized = query.toLowerCase().trim();
-    return state.listings.filter((listing) => {
-      if (!normalized) return true;
-      return [
-        listing.title,
-        listing.category,
-        listing.description,
-        listing.location,
-        ...listing.items.flatMap((item) => [item.name, item.notes ?? ""])
-      ].some((field) => field.toLowerCase().includes(normalized));
-    });
-  }, [query, state.listings]);
+    const minPrice = Number.parseFloat(browseFilters.minPrice);
+    const maxPrice = Number.parseFloat(browseFilters.maxPrice);
+    return state.listings
+      .filter((listing) => {
+        if (browseFilters.category !== "all" && listing.category !== browseFilters.category) return false;
+        if (browseFilters.condition !== "all" && listing.condition !== browseFilters.condition) return false;
+        if (browseFilters.status !== "all" && listing.status !== browseFilters.status) return false;
+        if (!Number.isNaN(minPrice) && listing.price < minPrice) return false;
+        if (!Number.isNaN(maxPrice) && listing.price > maxPrice) return false;
+        if (!normalized) return true;
+        return [
+          listing.title,
+          listing.category,
+          listing.description,
+          listing.location,
+          ...listing.items.flatMap((item) => [item.name, item.notes ?? ""])
+        ].some((field) => field.toLowerCase().includes(normalized));
+      })
+      .sort((first, second) => {
+        if (browseFilters.sort === "price_asc") return first.price - second.price;
+        if (browseFilters.sort === "price_desc") return second.price - first.price;
+        if (browseFilters.sort === "title") return first.title.localeCompare(second.title);
+        return new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime();
+      });
+  }, [browseFilters, query, state.listings]);
+  const selectedListing =
+    visibleListings.find((listing) => listing.id === selectedListingId) ??
+    visibleListings[0] ??
+    null;
   const userReservations = activeUser
     ? state.reservations.filter(
         (reservation) => reservation.sellerId === activeUser.id || reservation.buyerId === activeUser.id
@@ -558,6 +646,8 @@ export default function App() {
   const unreadCount = state.notifications.filter(
     (notification) => activeUser && notification.userId === activeUser.id && !notification.readAt
   ).length;
+  const cancellationReservation =
+    userReservations.find((reservation) => reservation.id === cancellationRequestId) ?? null;
 
   function update(nextState: AppState) {
     setState(computeHoldExpirationNotifications(nextState));
@@ -641,19 +731,34 @@ export default function App() {
     });
   }
 
-  async function handleCreateListing(draft: ListingDraft): Promise<boolean> {
+  async function handleCreateListing(draft: ListingDraft, sellerSetup?: SellerSetupDraft): Promise<boolean> {
     if (dataSource === "cloudflare") {
       if (!sessionUser) {
         promptLogin(text.loginPublishListing);
         return false;
       }
-      const next = await runRemoteAction(() => createRemoteListing(draft));
+      const next = await runRemoteAction(async () => {
+        if (sellerSetup) {
+          const result = await updateRemoteProfile({
+            displayName: sessionUser.name,
+            bio: sessionUser.bio,
+            pickupArea: sellerSetup.pickupArea,
+            offPlatformInstructions: sellerSetup.offPlatformInstructions,
+            responseExpectation: sellerSetup.responseExpectation,
+            cancellationPolicy: sellerSetup.cancellationPolicy
+          });
+          setSessionUser(result.user);
+        }
+        return createRemoteListing(draft);
+      });
       setSelectedListingId(next.listings[0].id);
       setView("browse");
       return true;
     }
 
-    const next = createListing(state, activeUser?.id ?? "", draft);
+    const sellerReadyState =
+      activeUser && sellerSetup ? updateSellerSetup(state, activeUser.id, sellerSetup) : state;
+    const next = createListing(sellerReadyState, activeUser?.id ?? "", draft);
     update(next);
     setSelectedListingId(next.listings[0].id);
     setView("browse");
@@ -687,6 +792,69 @@ export default function App() {
     if (next === state) return false;
     update(next);
     return true;
+  }
+
+  function handleSaveSellerSetup(draft: SellerSetupDraft) {
+    if (!activeUser) return;
+    if (dataSource === "local") {
+      update(updateSellerSetup(state, activeUser.id, draft));
+      return;
+    }
+    runRemoteAction(() =>
+      updateRemoteProfile({
+        displayName: activeUser.name,
+        bio: activeUser.bio,
+        pickupArea: draft.pickupArea,
+        offPlatformInstructions: draft.offPlatformInstructions,
+        responseExpectation: draft.responseExpectation,
+        cancellationPolicy: draft.cancellationPolicy
+      }).then((result) => {
+        setSessionUser(result.user);
+        return result.state;
+      })
+    ).then(() => setAuthMessage(text.sellerSetupSavedLocal));
+  }
+
+  function handleUpdateHandoffPlan(reservationId: string, draft: HandoffPlanDraft) {
+    if (dataSource === "cloudflare") {
+      if (!sessionUser) {
+        promptLogin(text.loginPickedItems);
+        return;
+      }
+      runRemoteAction(() =>
+        updateRemoteReservationHandoff(reservationId, {
+          handoffMethod: draft.mode,
+          handoffWindow: draft.window,
+          handoffLocation: draft.mode === "pickup" ? draft.locationOrTracking : undefined,
+          handoffTracking: draft.mode === "shipping" ? draft.locationOrTracking : undefined,
+          handoffNote: draft.note
+        })
+      );
+      return;
+    }
+
+    update(updateReservationHandoffPlan(state, reservationId, activeUser?.id ?? "", draft));
+  }
+
+  function handleCancelReservation(reservationId: string, reason: string) {
+    if (dataSource === "cloudflare") {
+      if (!sessionUser) {
+        promptLogin(text.loginPickedItems);
+        return;
+      }
+      runRemoteAction(() =>
+        updateRemoteReservationStatus(reservationId, {
+          status: "cancelled",
+          reason,
+          recoveryAction: "relist"
+        })
+      );
+      setCancellationRequestId(null);
+      return;
+    }
+
+    update(cancelReservation(state, reservationId, activeUser?.id ?? "", reason));
+    setCancellationRequestId(null);
   }
 
   async function handleExportData() {
@@ -882,6 +1050,9 @@ export default function App() {
             activeUserId={activeUser?.id ?? ""}
             query={query}
             setQuery={setQuery}
+            filters={browseFilters}
+            setFilters={setBrowseFilters}
+            categories={listingCategories}
             selectListing={setSelectedListingId}
             reserveListing={handleReserve}
             shareListing={handleShareListing}
@@ -897,6 +1068,7 @@ export default function App() {
             activeUser={activeUser}
             onCreate={handleCreateListing}
             onUpdate={handleUpdateListing}
+            onSaveSellerSetup={handleSaveSellerSetup}
             listings={state.listings}
             reservations={state.reservations}
             userNameFor={(userId) => getUserName(state, userId)}
@@ -908,6 +1080,7 @@ export default function App() {
                 ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
+            requestCancellation={setCancellationRequestId}
             imageUploadAdapter={platformAdapters.imageUpload}
             text={text}
             locale={locale}
@@ -920,11 +1093,13 @@ export default function App() {
             activeUserId={activeUser?.id ?? ""}
             selectedReservationId={selectedReservation?.id}
             openChat={openReservationChat}
+            updateHandoffPlan={handleUpdateHandoffPlan}
             updateStatus={(reservationId, status) =>
               dataSource === "cloudflare"
                 ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
+            requestCancellation={setCancellationRequestId}
             coordinationNotice={text.coordinationNotice}
             text={text}
             locale={locale}
@@ -947,6 +1122,7 @@ export default function App() {
                 ? runRemoteAction(() => updateRemoteReservationStatus(reservationId, status))
                 : update(updateReservationStatus(state, reservationId, activeUser?.id ?? "", status))
             }
+            requestCancellation={setCancellationRequestId}
             text={text}
             locale={locale}
           />
@@ -979,6 +1155,16 @@ export default function App() {
           />
         )}
       </main>
+      {cancellationReservation && (
+        <CancellationModal
+          reservation={cancellationReservation}
+          listing={state.listings.find((listing) => listing.id === cancellationReservation.listingId)}
+          activeUserId={activeUser?.id ?? ""}
+          onClose={() => setCancellationRequestId(null)}
+          onConfirm={handleCancelReservation}
+          text={text}
+        />
+      )}
     </div>
   );
 }
@@ -1244,6 +1430,9 @@ function BrowseView({
   activeUserId,
   query,
   setQuery,
+  filters,
+  setFilters,
+  categories,
   selectListing,
   reserveListing,
   shareListing,
@@ -1251,10 +1440,13 @@ function BrowseView({
   locale
 }: {
   listings: Listing[];
-  selectedListing: Listing;
+  selectedListing: Listing | null;
   activeUserId: string;
   query: string;
   setQuery: (query: string) => void;
+  filters: BrowseFilters;
+  setFilters: (filters: BrowseFilters) => void;
+  categories: string[];
   selectListing: (id: string) => void;
   reserveListing: (id: string) => void;
   shareListing: (listing: Listing) => void;
@@ -1274,7 +1466,85 @@ function BrowseView({
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={text.searchListings} />
           </label>
         </div>
+        <div className="browse-filters" aria-label={text.browseFilters}>
+          <Filter size={18} />
+          <label>
+            <span>{text.category}</span>
+            <select
+              value={filters.category}
+              onChange={(event) => setFilters({ ...filters, category: event.target.value })}
+            >
+              <option value="all">{text.allCategories}</option>
+              {categories.map((category) => (
+                <option key={category} value={category}>
+                  {categoryLabel(category, locale)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>{text.condition}</span>
+            <select
+              value={filters.condition}
+              onChange={(event) => setFilters({ ...filters, condition: event.target.value })}
+            >
+              <option value="all">{text.allConditions}</option>
+              {["new", "like_new", "good", "fair"].map((condition) => (
+                <option key={condition} value={condition}>
+                  {statusLabel(condition, locale)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>{text.status}</span>
+            <select value={filters.status} onChange={(event) => setFilters({ ...filters, status: event.target.value })}>
+              <option value="all">{text.allStatuses}</option>
+              {["available", "reserved", "paused", "sold"].map((status) => (
+                <option key={status} value={status}>
+                  {statusLabel(status, locale)}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>{text.minPrice}</span>
+            <input
+              type="number"
+              min="0"
+              inputMode="decimal"
+              value={filters.minPrice}
+              onChange={(event) => setFilters({ ...filters, minPrice: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>{text.maxPrice}</span>
+            <input
+              type="number"
+              min="0"
+              inputMode="decimal"
+              value={filters.maxPrice}
+              onChange={(event) => setFilters({ ...filters, maxPrice: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>{text.sortBy}</span>
+            <select
+              value={filters.sort}
+              onChange={(event) => setFilters({ ...filters, sort: event.target.value as BrowseSort })}
+            >
+              <option value="newest">{text.sortNewest}</option>
+              <option value="price_asc">{text.sortPriceLow}</option>
+              <option value="price_desc">{text.sortPriceHigh}</option>
+              <option value="title">{text.sortTitle}</option>
+            </select>
+          </label>
+          <button type="button" className="secondary" onClick={() => setFilters(DEFAULT_BROWSE_FILTERS)}>
+            {text.clearFilters}
+          </button>
+        </div>
         <div className="listing-grid">
+          {listings.length === 0 && <p className="empty-state">{text.noFilteredListings}</p>}
           {listings.map((listing) => {
             const itemSummary = getListingItemSummary(listing);
             return (
@@ -1511,10 +1781,77 @@ function ListingItemFields({
   );
 }
 
+function SellerSetupPanel({
+  setup,
+  onChange,
+  onSave,
+  complete,
+  text
+}: {
+  setup: SellerSetupDraft;
+  onChange: (setup: SellerSetupDraft) => void;
+  onSave: () => void;
+  complete: boolean;
+  text: Copy;
+}) {
+  function patch(field: keyof SellerSetupDraft, value: string) {
+    onChange({ ...setup, [field]: value });
+  }
+
+  return (
+    <section className={complete ? "seller-setup complete" : "seller-setup"}>
+      <div className="subsection-header">
+        <div>
+          <span>{text.sellerSetupTitle}</span>
+          <p>{text.sellerSetupHelp}</p>
+        </div>
+        <span className={`badge ${complete ? "available" : "overdue"}`}>
+          {complete ? text.sellerSetupReady : text.sellerSetupRequired}
+        </span>
+      </div>
+      <div className="field-grid">
+        <label>
+          <span>{text.pickupArea}</span>
+          <input value={setup.pickupArea} onChange={(event) => patch("pickupArea", event.target.value)} />
+        </label>
+        <label>
+          <span>{text.responseExpectation}</span>
+          <input
+            value={setup.responseExpectation}
+            onChange={(event) => patch("responseExpectation", event.target.value)}
+          />
+        </label>
+      </div>
+      <label>
+        <span>{text.offPlatformInstructions}</span>
+        <textarea
+          rows={3}
+          value={setup.offPlatformInstructions}
+          onChange={(event) => patch("offPlatformInstructions", event.target.value)}
+        />
+      </label>
+      <label>
+        <span>{text.cancellationHandoffPolicy}</span>
+        <textarea
+          rows={3}
+          value={setup.cancellationPolicy}
+          onChange={(event) => patch("cancellationPolicy", event.target.value)}
+        />
+      </label>
+      <div className="button-row">
+        <button type="button" className="secondary" disabled={!complete} onClick={onSave}>
+          {text.saveSellerSetup}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 function SellView({
   activeUser,
   onCreate,
   onUpdate,
+  onSaveSellerSetup,
   listings,
   reservations,
   userNameFor,
@@ -1522,13 +1859,15 @@ function SellView({
   openOrder,
   updateStatus,
   updateReservation,
+  requestCancellation,
   imageUploadAdapter,
   text,
   locale
 }: {
   activeUser: User | null;
-  onCreate: (draft: ListingDraft) => Promise<boolean> | boolean;
+  onCreate: (draft: ListingDraft, sellerSetup: SellerSetupDraft) => Promise<boolean> | boolean;
   onUpdate: (listingId: string, draft: ListingDraft) => Promise<boolean> | boolean;
+  onSaveSellerSetup: (draft: SellerSetupDraft) => void;
   listings: Listing[];
   reservations: Reservation[];
   userNameFor: (userId: string) => string;
@@ -1536,18 +1875,32 @@ function SellView({
   openOrder: (reservationId: string) => void;
   updateStatus: (listingId: string, status: Exclude<ListingStatus, "reserved">) => void;
   updateReservation: (reservationId: string, status: Reservation["status"]) => void;
+  requestCancellation: (reservationId: string) => void;
   imageUploadAdapter: ImageUploadAdapter;
   text: Copy;
   locale: Locale;
 }) {
   const [draft, setDraft] = useState<ListingDraft>(createBlankDraft);
+  const [sellerSetup, setSellerSetup] = useState<SellerSetupDraft>(() => getSellerSetup(activeUser));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<ListingDraft | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [editUploadError, setEditUploadError] = useState("");
   const [editError, setEditError] = useState("");
+
+  useEffect(() => {
+    setSellerSetup(getSellerSetup(activeUser));
+  }, [activeUser?.id]);
+
   const sellerListings = activeUser ? listings.filter((listing) => listing.sellerId === activeUser.id) : [];
+  const sellerSetupComplete = Boolean(
+    sellerSetup.pickupArea.trim() &&
+      sellerSetup.offPlatformInstructions.trim() &&
+      sellerSetup.responseExpectation.trim() &&
+      sellerSetup.cancellationPolicy.trim()
+  );
   const canPublish =
+    sellerSetupComplete &&
     draft.title.trim() &&
     draft.description.trim() &&
     draft.location.trim() &&
@@ -1629,7 +1982,7 @@ function SellView({
         onSubmit={async (event) => {
           event.preventDefault();
           if (!canPublish) return;
-          const created = await onCreate(draft);
+          const created = await onCreate(draft, sellerSetup);
           if (created) {
             setDraft(createBlankDraft());
           }
@@ -1641,6 +1994,13 @@ function SellView({
             <h1>{text.createListing}</h1>
           </div>
         </div>
+        <SellerSetupPanel
+          setup={sellerSetup}
+          onChange={setSellerSetup}
+          onSave={() => onSaveSellerSetup(sellerSetup)}
+          complete={sellerSetupComplete}
+          text={text}
+        />
         <label>
           <span>{text.images}</span>
           <input
@@ -1753,7 +2113,7 @@ function SellView({
                       <button
                         type="button"
                         className="secondary"
-                        onClick={() => updateReservation(activeReservation.id, "cancelled")}
+                        onClick={() => requestCancellation(activeReservation.id)}
                       >
                         {text.cancel}
                       </button>
@@ -1908,13 +2268,118 @@ function SellView({
   );
 }
 
+function HandoffPlanPanel({
+  reservation,
+  onSave,
+  canEdit,
+  text
+}: {
+  reservation: Reservation;
+  onSave: (draft: HandoffPlanDraft) => void;
+  canEdit: boolean;
+  text: Copy;
+}) {
+  const currentPlan = getReservationHandoffPlan(reservation);
+  const [draft, setDraft] = useState<HandoffPlanDraft>({
+    mode: currentPlan?.mode ?? "pickup",
+    window: currentPlan?.window ?? "",
+    locationOrTracking: currentPlan?.locationOrTracking ?? "",
+    note: currentPlan?.note ?? ""
+  });
+  const canSave = Boolean(draft.window.trim() && draft.locationOrTracking.trim());
+
+  useEffect(() => {
+    setDraft({
+      mode: currentPlan?.mode ?? "pickup",
+      window: currentPlan?.window ?? "",
+      locationOrTracking: currentPlan?.locationOrTracking ?? "",
+      note: currentPlan?.note ?? ""
+    });
+  }, [reservation.id, currentPlan?.updatedAt]);
+
+  return (
+    <section className="handoff-plan">
+      <div className="handoff-plan-header">
+        <CalendarClock size={18} />
+        <div>
+          <strong>{text.handoffPlan}</strong>
+          {currentPlan?.updatedAt && <p>{text.updated} {new Date(currentPlan.updatedAt).toLocaleString()}</p>}
+        </div>
+      </div>
+      {currentPlan && (
+        <dl className="handoff-summary">
+          <div>
+            <dt>{text.handoffMode}</dt>
+            <dd>{currentPlan.mode === "shipping" ? text.shipping : text.pickup}</dd>
+          </div>
+          <div>
+            <dt>{text.handoffWindow}</dt>
+            <dd>{currentPlan.window}</dd>
+          </div>
+          <div>
+            <dt>{currentPlan.mode === "shipping" ? text.tracking : text.handoffLocation}</dt>
+            <dd>{currentPlan.locationOrTracking}</dd>
+          </div>
+          {currentPlan.note && (
+            <div>
+              <dt>{text.handoffNote}</dt>
+              <dd>{currentPlan.note}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {canEdit && (
+        <div className="handoff-form">
+          <div className="field-grid">
+            <label>
+              <span>{text.handoffMode}</span>
+              <select
+                value={draft.mode}
+                onChange={(event) => setDraft({ ...draft, mode: event.target.value as HandoffPlanDraft["mode"] })}
+              >
+                <option value="pickup">{text.pickup}</option>
+                <option value="shipping">{text.shipping}</option>
+              </select>
+            </label>
+            <label>
+              <span>{text.handoffWindow}</span>
+              <input value={draft.window} onChange={(event) => setDraft({ ...draft, window: event.target.value })} />
+            </label>
+          </div>
+          <label>
+            <span>{draft.mode === "shipping" ? text.tracking : text.handoffLocation}</span>
+            <input
+              value={draft.locationOrTracking}
+              onChange={(event) => setDraft({ ...draft, locationOrTracking: event.target.value })}
+            />
+          </label>
+          <label>
+            <span>{text.handoffNote}</span>
+            <textarea
+              rows={2}
+              value={draft.note ?? ""}
+              onChange={(event) => setDraft({ ...draft, note: event.target.value })}
+            />
+          </label>
+          <button type="button" className="secondary" disabled={!canSave} onClick={() => onSave(draft)}>
+            <Truck size={16} />
+            {text.saveHandoffPlan}
+          </button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function OrdersView({
   state,
   reservations,
   activeUserId,
   selectedReservationId,
   openChat,
+  updateHandoffPlan,
   updateStatus,
+  requestCancellation,
   coordinationNotice,
   text,
   locale
@@ -1924,7 +2389,9 @@ function OrdersView({
   activeUserId: string;
   selectedReservationId?: string;
   openChat: (id: string) => void;
+  updateHandoffPlan: (reservationId: string, draft: HandoffPlanDraft) => void;
   updateStatus: (reservationId: string, status: Reservation["status"]) => void;
+  requestCancellation: (reservationId: string) => void;
   coordinationNotice: string;
   text: Copy;
   locale: Locale;
@@ -1943,6 +2410,8 @@ function OrdersView({
           {reservations.map((reservation) => {
             const listing = state.listings.find((item) => item.id === reservation.listingId);
             const isSeller = reservation.sellerId === activeUserId;
+            const canCancel = !isTerminalReservation(reservation.status);
+            const cancellation = getReservationCancellation(reservation);
             return (
               <article
                 className={reservation.id === selectedReservationId ? "order-card active-order" : "order-card"}
@@ -1959,6 +2428,17 @@ function OrdersView({
                   <p className="muted">
                     {text.buyer} {getUserName(state, reservation.buyerId)} · {text.seller} {getUserName(state, reservation.sellerId)}
                   </p>
+                  <HandoffPlanPanel
+                    reservation={reservation}
+                    onSave={(draft) => updateHandoffPlan(reservation.id, draft)}
+                    canEdit={!isTerminalReservation(reservation.status)}
+                    text={text}
+                  />
+                  {reservation.status === "cancelled" && cancellation.reason && (
+                    <p className="muted">
+                      {text.cancellationReason}: {cancellation.reason}
+                    </p>
+                  )}
                   <div className="button-row">
                     <button className="secondary" onClick={() => openChat(reservation.id)}>
                       <MessageSquare size={16} />
@@ -1969,10 +2449,12 @@ function OrdersView({
                         <button className="secondary" onClick={() => updateStatus(reservation.id, "sold")}>
                           {text.completeHandoff}
                         </button>
-                        <button className="secondary" onClick={() => updateStatus(reservation.id, "cancelled")}>
-                          {text.cancel}
-                        </button>
                       </>
+                    )}
+                    {canCancel && (
+                      <button className="secondary" onClick={() => requestCancellation(reservation.id)}>
+                        {text.cancelReservation}
+                      </button>
                     )}
                   </div>
                 </div>
@@ -1994,6 +2476,7 @@ function ChatView({
   reservations,
   send,
   updateStatus,
+  requestCancellation,
   text,
   locale
 }: {
@@ -2004,6 +2487,7 @@ function ChatView({
   reservations: Reservation[];
   send: (reservationId: string, body: string) => void;
   updateStatus: (reservationId: string, status: Reservation["status"]) => void;
+  requestCancellation: (reservationId: string) => void;
   text: Copy;
   locale: Locale;
 }) {
@@ -2064,16 +2548,26 @@ function ChatView({
               <input value={body} onChange={(event) => setBody(event.target.value)} placeholder={text.writeMessage} />
               <button className="primary">{text.send}</button>
             </form>
+            {getReservationHandoffPlan(selectedReservation) && (
+              <HandoffPlanPanel
+                reservation={selectedReservation}
+                onSave={() => undefined}
+                canEdit={false}
+                text={text}
+              />
+            )}
             <div className="button-row chat-actions">
               {canResolveReservation && (
                 <>
                   <button className="secondary" onClick={() => updateStatus(selectedReservation.id, "sold")}>
                     {text.completeHandoff}
                   </button>
-                  <button className="secondary" onClick={() => updateStatus(selectedReservation.id, "cancelled")}>
-                    {text.cancel}
-                  </button>
                 </>
+              )}
+              {selectedReservation && !isTerminalReservation(selectedReservation.status) && (
+                <button className="secondary" onClick={() => requestCancellation(selectedReservation.id)}>
+                  {text.cancelReservation}
+                </button>
               )}
             </div>
           </>
@@ -2082,6 +2576,71 @@ function ChatView({
         )}
       </div>
     </section>
+  );
+}
+
+function CancellationModal({
+  reservation,
+  listing,
+  activeUserId,
+  onClose,
+  onConfirm,
+  text
+}: {
+  reservation: Reservation;
+  listing?: Listing;
+  activeUserId: string;
+  onClose: () => void;
+  onConfirm: (reservationId: string, reason: string) => void;
+  text: Copy;
+}) {
+  const [reason, setReason] = useState("");
+  const [details, setDetails] = useState("");
+  const role = reservation.sellerId === activeUserId ? text.sellerRole : text.buyerRole;
+  const finalReason = [reason, details.trim()].filter(Boolean).join(": ");
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal" role="dialog" aria-modal="true" aria-labelledby="cancel-reservation-title">
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">{role}</p>
+            <h1 id="cancel-reservation-title">{text.cancelReservation}</h1>
+          </div>
+          <button className="secondary icon-button" type="button" aria-label={text.closeModal} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <p className="muted">{listing?.title ?? text.deletedListing}</p>
+        <label>
+          <span>{text.cancellationReason}</span>
+          <select value={reason} onChange={(event) => setReason(event.target.value)}>
+            <option value="">{text.chooseCancellationReason}</option>
+            <option value={text.reasonChangedPlans}>{text.reasonChangedPlans}</option>
+            <option value={text.reasonNoResponse}>{text.reasonNoResponse}</option>
+            <option value={text.reasonUnavailable}>{text.reasonUnavailable}</option>
+            <option value={text.reasonOther}>{text.reasonOther}</option>
+          </select>
+        </label>
+        <label>
+          <span>{text.cancellationDetails}</span>
+          <textarea rows={4} value={details} onChange={(event) => setDetails(event.target.value)} />
+        </label>
+        <div className="button-row modal-actions">
+          <button type="button" className="secondary" onClick={onClose}>
+            {text.keepReservation}
+          </button>
+          <button
+            type="button"
+            className="primary"
+            disabled={!finalReason.trim()}
+            onClick={() => onConfirm(reservation.id, finalReason)}
+          >
+            {text.confirmCancellation}
+          </button>
+        </div>
+      </section>
+    </div>
   );
 }
 

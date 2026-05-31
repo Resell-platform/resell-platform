@@ -15,7 +15,8 @@ import {
   type Notification,
   type ProfileDraft,
   type RegistrationDraft,
-  type Reservation
+  type Reservation,
+  type User
 } from "./types";
 
 const STORAGE_KEY = "resell-platform:v1";
@@ -29,6 +30,23 @@ const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
   "overdue"
 ];
 const LISTING_CONDITIONS = new Set(["new", "like_new", "good", "fair"]);
+
+export type SellerSetupDraft = {
+  pickupArea: string;
+  offPlatformInstructions: string;
+  responseExpectation: string;
+  cancellationPolicy: string;
+};
+
+export type HandoffPlanDraft = {
+  mode: "pickup" | "shipping";
+  window: string;
+  locationOrTracking: string;
+  note?: string;
+};
+
+type SellerSetupUser = User & Partial<SellerSetupDraft>;
+type LocalNotificationType = Notification["type"] | "reservation_cancelled" | "handoff_planned";
 
 const stateResource = createLocalStorageResource<AppState>({
   key: STORAGE_KEY,
@@ -60,6 +78,40 @@ export function resetState(): AppState {
 
 export function getPrimaryImage(listing: Listing): string | undefined {
   return listing.images.find((image) => image.primary)?.dataUrl ?? listing.images[0]?.dataUrl;
+}
+
+export function getSellerSetup(user?: User | null): SellerSetupDraft {
+  const seller = (user ?? {}) as Partial<SellerSetupUser>;
+  return {
+    pickupArea: seller.pickupArea ?? "",
+    offPlatformInstructions: seller.offPlatformInstructions ?? "",
+    responseExpectation: seller.responseExpectation ?? "",
+    cancellationPolicy: seller.cancellationPolicy ?? ""
+  };
+}
+
+export function hasCompleteSellerSetup(state: AppState, sellerId: string): boolean {
+  return isCompleteSellerSetup(getSellerSetup(state.users.find((user) => user.id === sellerId)));
+}
+
+export function updateSellerSetup(state: AppState, sellerId: string, draft: SellerSetupDraft): AppState {
+  const seller = state.users.find((user) => user.id === sellerId);
+  if (!seller || seller.role !== "seller") return state;
+
+  return {
+    ...state,
+    users: state.users.map((user) =>
+      user.id === sellerId
+        ? {
+            ...user,
+            pickupArea: draft.pickupArea.trim(),
+            offPlatformInstructions: draft.offPlatformInstructions.trim(),
+            responseExpectation: draft.responseExpectation.trim(),
+            cancellationPolicy: draft.cancellationPolicy.trim()
+          }
+        : user
+    )
+  };
 }
 
 function isValidListingDraft(draft: ListingDraft): boolean {
@@ -253,6 +305,7 @@ export function updateUserProfile(state: AppState, userId: string, draft: Profil
 
 export function createListing(state: AppState, sellerId: string, draft: ListingDraft): AppState {
   if (!isValidListingDraft(draft)) return state;
+  if (!hasCompleteSellerSetup(state, sellerId)) return state;
 
   const now = new Date().toISOString();
   const listingId = createId("listing");
@@ -432,6 +485,7 @@ export function updateReservationStatus(
   if (["paid", "sold", "cancelled"].includes(reservation.status)) return state;
   if (status !== "sold" && status !== "cancelled") return state;
   if (status === "sold" && actorId !== reservation.sellerId) return state;
+  if (status === "cancelled") return cancelReservation(state, reservationId, actorId, "");
 
   const now = new Date().toISOString();
   const nextListings = state.listings.map((listing) => {
@@ -468,6 +522,100 @@ export function updateReservationStatus(
       item.id === reservationId ? { ...item, status, updatedAt: now } : item
     ),
     notifications
+  };
+}
+
+export function cancelReservation(
+  state: AppState,
+  reservationId: string,
+  actorId: string,
+  reason: string
+): AppState {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation || !canAccessReservation(reservation, actorId)) return state;
+  if (["paid", "sold", "cancelled"].includes(reservation.status)) return state;
+
+  const now = new Date().toISOString();
+  const trimmedReason = reason.trim() || "No reason provided.";
+  const listing = state.listings.find((item) => item.id === reservation.listingId);
+  const recipientId = actorId === reservation.buyerId ? reservation.sellerId : reservation.buyerId;
+
+  const notification = createLocalNotification({
+    userId: recipientId,
+    type: "reservation_cancelled",
+    title: "Reservation cancelled",
+    body: `${getUserName(state, actorId)} cancelled ${listing?.title ?? "a reservation"}. Reason: ${trimmedReason}`,
+    entityId: reservationId,
+    createdAt: now
+  });
+
+  return {
+    ...state,
+    listings: state.listings.map((item) =>
+      item.id === reservation.listingId ? { ...item, status: "available" as const, updatedAt: now } : item
+    ),
+    reservations: state.reservations.map((item) =>
+      item.id === reservationId
+        ? {
+            ...item,
+            status: "cancelled" as const,
+            cancellationReason: trimmedReason,
+            cancelledByUserId: actorId,
+            cancelledAt: now,
+            recoveryState: "relisted" as const,
+            updatedAt: now
+          }
+        : item
+    ),
+    notifications: [notification, ...state.notifications]
+  };
+}
+
+export function updateReservationHandoffPlan(
+  state: AppState,
+  reservationId: string,
+  actorId: string,
+  draft: HandoffPlanDraft
+): AppState {
+  const reservation = state.reservations.find((item) => item.id === reservationId);
+  if (!reservation || !canAccessReservation(reservation, actorId)) return state;
+  if (["paid", "sold", "cancelled"].includes(reservation.status)) return state;
+
+  const mode = draft.mode === "shipping" ? "shipping" : "pickup";
+  const window = draft.window.trim();
+  const locationOrTracking = draft.locationOrTracking.trim();
+  const note = draft.note?.trim();
+  if (!window || !locationOrTracking) return state;
+
+  const now = new Date().toISOString();
+  const listing = state.listings.find((item) => item.id === reservation.listingId);
+  const recipientId = actorId === reservation.buyerId ? reservation.sellerId : reservation.buyerId;
+  const notification = createLocalNotification({
+    userId: recipientId,
+    type: "handoff_planned",
+    title: "Handoff plan updated",
+    body: `${getUserName(state, actorId)} updated the ${mode} plan for ${listing?.title ?? "a reservation"}.`,
+    entityId: reservationId,
+    createdAt: now
+  });
+
+  return {
+    ...state,
+    reservations: state.reservations.map((item) =>
+      item.id === reservationId
+        ? {
+            ...item,
+            status: "payment_sent" as const,
+            handoffMethod: mode,
+            handoffWindow: window,
+            handoffLocation: mode === "pickup" ? locationOrTracking : undefined,
+            handoffTracking: mode === "shipping" ? locationOrTracking : undefined,
+            handoffNote: note || undefined,
+            updatedAt: now
+          }
+        : item
+    ),
+    notifications: [notification, ...state.notifications]
   };
 }
 
@@ -608,6 +756,30 @@ function hasValidDraftItems(draft: ListingDraft): boolean {
         Boolean(item.condition && LISTING_CONDITIONS.has(item.condition))
     )
   );
+}
+
+function isCompleteSellerSetup(setup: SellerSetupDraft): boolean {
+  return Boolean(
+    setup.pickupArea.trim() &&
+      setup.offPlatformInstructions.trim() &&
+      setup.responseExpectation.trim() &&
+      setup.cancellationPolicy.trim()
+  );
+}
+
+function createLocalNotification(draft: {
+  userId: string;
+  type: LocalNotificationType;
+  title: string;
+  body: string;
+  entityId?: string;
+  createdAt: string;
+}): Notification {
+  return {
+    ...draft,
+    id: createId("notification"),
+    type: draft.type as Notification["type"]
+  };
 }
 
 function normalizeListingItem(item: ListingItem, listing: Listing, index: number): ListingItem | undefined {

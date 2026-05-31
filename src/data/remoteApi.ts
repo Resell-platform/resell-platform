@@ -146,6 +146,13 @@ export async function updateRemoteProfile(draft: {
   bio?: string;
   pickupArea?: string;
   phoneE164?: string;
+  pickupZip?: string;
+  serviceAreaMiles?: number;
+  pickupPolicy?: string;
+  handoffPolicy?: string;
+  cancellationPolicy?: string;
+  offPlatformInstructions?: string;
+  responseExpectation?: string;
 }): Promise<AuthStateResponse> {
   return apiRequest<AuthStateResponse>("/api/me", {
     method: "PATCH",
@@ -191,10 +198,38 @@ export async function sendRemoteMessage(reservationId: string, body: string): Pr
   });
 }
 
-export async function updateRemoteReservationStatus(reservationId: string, status: ReservationStatus): Promise<AppState> {
+export async function updateRemoteReservationStatus(
+  reservationId: string,
+  status:
+    | ReservationStatus
+    | {
+        status: ReservationStatus;
+        reason?: string;
+        note?: string;
+        recoveryAction?: "relist" | "pause";
+      }
+): Promise<AppState> {
   return apiRequest<AppState>(`/api/reservations/${encodeURIComponent(reservationId)}/status`, {
     method: "POST",
-    body: JSON.stringify({ status })
+    body: JSON.stringify(typeof status === "string" ? { status } : status)
+  });
+}
+
+export async function updateRemoteReservationHandoff(
+  reservationId: string,
+  draft: {
+    handoffMethod?: "pickup" | "shipping";
+    handoffWindow?: string;
+    handoffLocation?: string;
+    handoffTracking?: string;
+    handoffNote?: string;
+    confirmBuyer?: boolean;
+    confirmSeller?: boolean;
+  }
+): Promise<AppState> {
+  return apiRequest<AppState>(`/api/reservations/${encodeURIComponent(reservationId)}`, {
+    method: "PATCH",
+    body: JSON.stringify(draft)
   });
 }
 
