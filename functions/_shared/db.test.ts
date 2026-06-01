@@ -26,6 +26,7 @@ type FakeDbHandlers = {
 
 function createDraft(items: ListingDraft["items"]): ListingDraft {
   return {
+    postType: "offer",
     title: "Kitchen bundle",
     description: "Small apartment kitchen starter set.",
     price: 95,
@@ -143,7 +144,7 @@ describe("Cloudflare listing persistence", () => {
     const itemStatements = statements.filter((statement) => statement.sql.includes("INSERT INTO listing_items"));
     const listingStatement = statements.find((statement) => statement.sql.includes("INSERT INTO listings"));
     expect(batch).toHaveBeenCalledTimes(1);
-    expect(listingStatement?.args.slice(4, 7)).toEqual([95, "Home", "good"]);
+    expect(listingStatement?.args.slice(5, 8)).toEqual([95, "Home", "good"]);
     expect(itemStatements).toHaveLength(2);
     expect(itemStatements[0].args.slice(2, 7)).toEqual(["Saucepan", 35, "good", "Stainless steel", 0]);
     expect(itemStatements[1].args.slice(2, 7)).toEqual(["Knife block", 60, "like_new", "Five knives", 1]);
@@ -317,8 +318,9 @@ describe("Cloudflare reservation workflow", () => {
     expect(batch).toHaveBeenCalledTimes(1);
     expect(reservationInsert?.sql).toContain("'requested'");
     expect(reservationInsert?.args.slice(1, 4)).toEqual(["listing-1", "buyer-1", "seller-1"]);
-    expect(notificationInsert?.args[2]).toBe("Jordan Lee is interested in Mirrorless camera kit.");
-    expect(String(notificationInsert?.args[2]).toLowerCase()).not.toMatch(/payment|paid/);
+    expect(notificationInsert?.args[2]).toBe("New buyer interest");
+    expect(notificationInsert?.args[3]).toBe("Jordan Lee is interested in Mirrorless camera kit.");
+    expect(String(notificationInsert?.args[3]).toLowerCase()).not.toMatch(/payment|paid/);
     expect(listingLock).toBeUndefined();
   });
 

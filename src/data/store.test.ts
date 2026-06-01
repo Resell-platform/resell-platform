@@ -20,6 +20,7 @@ import { seedState } from "./seed";
 import { MAX_LISTING_ITEMS, type AppState, type ListingDraft } from "./types";
 
 const draft: ListingDraft = {
+  postType: "offer",
   title: "Road bike",
   description: "Aluminum frame, recently tuned.",
   price: 420,
@@ -226,6 +227,33 @@ describe("store state transitions", () => {
     const next = createListing(simplifiedSetupState, "seller-1", draft);
 
     expect(next.listings[0].title).toBe(draft.title);
+  });
+
+  it("lets buyers create request posts without seller setup or priced items", () => {
+    const request = createListing(seedState, "buyer-1", {
+      ...draft,
+      postType: "request",
+      title: "Looking for a compact desk",
+      description: "Need a desk that fits a small bedroom.",
+      location: "Queens pickup",
+      images: [],
+      items: [
+        {
+          id: "request-item-1",
+          name: "Compact desk",
+          position: 0,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]
+    });
+
+    expect(request.listings[0]).toMatchObject({
+      sellerId: "buyer-1",
+      postType: "request",
+      title: "Looking for a compact desk",
+      price: 0,
+      status: "available"
+    });
   });
 
   it("rejects missing, partial, and oversized item sets", () => {

@@ -55,6 +55,7 @@ export const seedState: AppState = {
     {
       id: "listing-1",
       sellerId: "seller-1",
+      postType: "offer",
       title: "Walnut writing desk",
       description: "Compact desk with two drawers. Minor wear on the top edge.",
       price: 180,
@@ -90,6 +91,7 @@ export const seedState: AppState = {
     {
       id: "listing-2",
       sellerId: "seller-1",
+      postType: "offer",
       title: "Mirrorless camera kit",
       description: "Body, 35mm lens, battery, and strap. Great starter kit.",
       price: 520,
@@ -131,6 +133,33 @@ export const seedState: AppState = {
             "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 640 480'%3E%3Crect width='640' height='480' fill='%23e9eef2'/%3E%3Crect x='150' y='165' width='340' height='210' rx='28' fill='%232a3137'/%3E%3Crect x='210' y='130' width='115' height='55' rx='14' fill='%2339434a'/%3E%3Ccircle cx='320' cy='272' r='86' fill='%230e151a'/%3E%3Ccircle cx='320' cy='272' r='55' fill='%23526f7e'/%3E%3Ccircle cx='440' cy='205' r='18' fill='%23f2c14e'/%3E%3C/svg%3E"
         }
       ]
+    },
+    {
+      id: "listing-3",
+      sellerId: "buyer-1",
+      postType: "request",
+      title: "Looking for a small bookshelf",
+      description: "Need a narrow bookshelf for a Queens apartment. Open to wood or metal if it fits a small room.",
+      price: 90,
+      category: "Furniture",
+      condition: "good",
+      location: "Queens or nearby pickup",
+      status: "available",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+      items: [
+        {
+          id: "listing-3-item-1",
+          listingId: "listing-3",
+          name: "Narrow bookshelf",
+          price: 90,
+          condition: "good",
+          notes: "Around 24 inches wide preferred.",
+          position: 0,
+          createdAt: now.toISOString()
+        }
+      ],
+      images: []
     }
   ],
   reservations: [

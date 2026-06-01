@@ -64,6 +64,7 @@ import {
   type Listing,
   type ListingDraft,
   type ListingItem,
+  type ListingPostType,
   type ListingStatus,
   type Message,
   type Notification,
@@ -124,8 +125,9 @@ function isTerminalReservation(status: Reservation["status"]): boolean {
   return TERMINAL_RESERVATION_STATUSES.has(status);
 }
 
-function createBlankDraft(): ListingDraft {
+function createBlankDraft(postType: ListingPostType = "offer"): ListingDraft {
   return {
+    postType,
     title: "",
     description: "",
     price: 0,
@@ -139,6 +141,7 @@ function createBlankDraft(): ListingDraft {
 
 function listingToDraft(listing: Listing): ListingDraft {
   return {
+    postType: listing.postType,
     title: listing.title,
     description: listing.description,
     price: listing.price,
@@ -305,9 +308,18 @@ function getItemCountText(listing: Listing, text: Copy) {
   return `${count} ${count === 1 ? text.itemSingular : text.itemPlural}`;
 }
 
+function isRequestPost(post: Pick<Listing | ListingDraft, "postType">) {
+  return post.postType === "request";
+}
+
+function getListingPriceText(listing: Listing, text: Copy) {
+  if (!isRequestPost(listing)) return `$${listing.price}`;
+  return listing.price > 0 ? `${text.budget}: $${listing.price}` : text.openBudget;
+}
+
 function getListingMetaParts(listing: Listing, text: Copy) {
   return [
-    `$${listing.price}`,
+    getListingPriceText(listing, text),
     getItemCountText(listing, text),
     `${text.updated} ${new Date(listing.updatedAt).toLocaleDateString()}`
   ].filter(Boolean);
@@ -353,7 +365,8 @@ function getActiveBrowseFilterCount(filters: BrowseFilters) {
   ].filter(Boolean).length;
 }
 
-function isDraftItemComplete(item: ListingItem) {
+function isDraftItemComplete(item: ListingItem, draft: ListingDraft) {
+  if (isRequestPost(draft)) return Boolean(item.name.trim());
   return Boolean(
     item.name.trim() &&
       Number.isFinite(item.price) &&
@@ -384,6 +397,7 @@ function useNarrowLayout() {
 
 function hasPublishableItems(draft: ListingDraft) {
   const items = Array.isArray(draft.items) ? draft.items : [];
+  const isRequest = isRequestPost(draft);
 
   return (
     items.length > 0 &&
@@ -391,9 +405,8 @@ function hasPublishableItems(draft: ListingDraft) {
     items.every(
       (item) =>
         item.name.trim() &&
-        Number.isFinite(item.price) &&
-        Number(item.price) > 0 &&
-        item.condition
+        (isRequest || (Number.isFinite(item.price) && Number(item.price) > 0)) &&
+        (isRequest || item.condition)
     )
   );
 }
@@ -803,7 +816,7 @@ export default function App() {
         return false;
       }
       const next = await runRemoteAction(async () => {
-        if (sellerSetup) {
+        if (sessionUser.role === "seller" && sellerSetup) {
           const result = await updateRemoteProfile({
             displayName: sessionUser.name,
             bio: sessionUser.bio,
@@ -820,7 +833,7 @@ export default function App() {
     }
 
     const sellerReadyState =
-      activeUser && sellerSetup ? updateSellerSetup(state, activeUser.id, sellerSetup) : state;
+      activeUser?.role === "seller" && sellerSetup ? updateSellerSetup(state, activeUser.id, sellerSetup) : state;
     const next = createListing(sellerReadyState, activeUser?.id ?? "", draft);
     update(next);
     setSelectedListingId(next.listings[0].id);
@@ -999,31 +1012,6 @@ export default function App() {
             </button>
           </>
         ) : null}
-        {!isNarrowLayout && dataSource === "cloudflare" ? (
-          <AccountPanel
-            user={sessionUser}
-            message={authMessage}
-            text={text}
-            loginAdapter={platformAdapters.login}
-            onMessage={setAuthMessage}
-            onExport={handleExportData}
-            onAuthenticated={(user, nextState) => {
-              setSessionUser(user);
-              setState(nextState);
-              setAuthMessage("");
-            }}
-            onProfileUpdated={(user, nextState) => {
-              setSessionUser(user);
-              setState(nextState);
-            }}
-            onLogout={async () => {
-              await platformAdapters.login.logout();
-              setSessionUser(null);
-              setState(await fetchRemoteState(""));
-              setView("browse");
-            }}
-          />
-        ) : null}
         <nav>
           <NavButton
             icon={<Search />}
@@ -1172,6 +1160,32 @@ export default function App() {
             <LanguageControl locale={locale} setLocale={setLocale} text={text} />
           </section>
         )}
+        {!isNarrowLayout && dataSource === "cloudflare" ? (
+          <AccountPanel
+            className="desktop-account-bar"
+            user={sessionUser}
+            message={authMessage}
+            text={text}
+            loginAdapter={platformAdapters.login}
+            onMessage={setAuthMessage}
+            onExport={handleExportData}
+            onAuthenticated={(user, nextState) => {
+              setSessionUser(user);
+              setState(nextState);
+              setAuthMessage("");
+            }}
+            onProfileUpdated={(user, nextState) => {
+              setSessionUser(user);
+              setState(nextState);
+            }}
+            onLogout={async () => {
+              await platformAdapters.login.logout();
+              setSessionUser(null);
+              setState(await fetchRemoteState(""));
+              setView("browse");
+            }}
+          />
+        ) : null}
         {actionError && <p className="global-error">{actionError}</p>}
         {view === "browse" && (
           <BrowseView
@@ -1393,6 +1407,7 @@ function UserSwitcher({ state, setState, text }: { state: AppState; setState: (s
 }
 
 function AccountPanel({
+  className,
   user,
   message,
   text,
@@ -1403,6 +1418,7 @@ function AccountPanel({
   onProfileUpdated,
   onLogout
 }: {
+  className?: string;
   user: User | null;
   message: string;
   text: Copy;
@@ -1478,7 +1494,7 @@ function AccountPanel({
 
   if (!user) {
     return (
-      <section className="account-panel">
+      <section className={`account-panel ${className ?? ""}`.trim()}>
         <div className="account-heading">
           <UserRound size={18} />
           <strong>{text.loginOrCreate}</strong>
@@ -1508,7 +1524,7 @@ function AccountPanel({
   }
 
   return (
-    <section className="account-panel signed-in">
+    <section className={`account-panel signed-in ${className ?? ""}`.trim()}>
       <div className="account-summary">
         <div className="account-heading">
           <UserRound size={18} />
@@ -1731,11 +1747,14 @@ function BrowseView({
                     }
                   }}
                 >
-                  <img src={getPrimaryImage(listing)} alt="" />
+                  <ListingImagePreview listing={listing} />
                   <div>
                     <span className={`badge ${listing.status}`}>{statusLabel(listing.status, locale)}</span>
+                    <span className={isRequestPost(listing) ? "post-type-badge request" : "post-type-badge offer"}>
+                      {isRequestPost(listing) ? text.requestPost : text.offerPost}
+                    </span>
                     <h2>{listing.title}</h2>
-                    <p>${listing.price}</p>
+                    <p>{getListingPriceText(listing, text)}</p>
                     {itemSummary.length > 0 && (
                       <>
                         <span className="item-count">{getItemCountText(listing, text)}</span>
@@ -1765,8 +1784,11 @@ function BrowseView({
           <ListingGallery listing={selectedListing} />
           <div className="detail-copy">
             <span className={`badge ${selectedListing.status}`}>{statusLabel(selectedListing.status, locale)}</span>
+            <span className={isRequestPost(selectedListing) ? "post-type-badge request" : "post-type-badge offer"}>
+              {isRequestPost(selectedListing) ? text.requestPost : text.offerPost}
+            </span>
             <h2>{selectedListing.title}</h2>
-            <p className="price">${selectedListing.price}</p>
+            <p className="price">{getListingPriceText(selectedListing, text)}</p>
             <p>{selectedListing.description}</p>
             {(() => {
               const displayItems = getListingDisplayItems(selectedListing);
@@ -1795,7 +1817,11 @@ function BrowseView({
               onClick={() => reserveListing(selectedListing.id)}
             >
               <ShoppingBag size={18} />
-              {selectedListing.sellerId === activeUserId ? text.yourListing : text.reserveItem}
+              {selectedListing.sellerId === activeUserId
+                ? text.yourPost
+                : isRequestPost(selectedListing)
+                  ? text.respondToRequest
+                  : text.reserveItem}
             </button>
             <button className="secondary sticky-cta" onClick={() => shareListing(selectedListing)}>
               <Share2 size={18} />
@@ -1867,14 +1893,35 @@ function ListingDetailItems({
 }
 
 function ListingGallery({ listing }: { listing: Listing }) {
+  const primaryImage = getPrimaryImage(listing);
   return (
     <div className="gallery">
-      <img className="hero-image" src={getPrimaryImage(listing)} alt="" />
-      <div className="thumb-row">
-        {listing.images.map((image) => (
-          <img key={image.id} src={image.dataUrl} alt="" />
-        ))}
-      </div>
+      {primaryImage ? (
+        <img className="hero-image" src={primaryImage} alt="" />
+      ) : (
+        <ListingImagePlaceholder className="hero-image" />
+      )}
+      {listing.images.length > 0 && (
+        <div className="thumb-row">
+          {listing.images.map((image) => (
+            <img key={image.id} src={image.dataUrl} alt="" />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListingImagePreview({ listing }: { listing: Listing }) {
+  const primaryImage = getPrimaryImage(listing);
+  if (primaryImage) return <img src={primaryImage} alt="" />;
+  return <ListingImagePlaceholder />;
+}
+
+function ListingImagePlaceholder({ className }: { className?: string }) {
+  return (
+    <div className={className ? `listing-image-placeholder ${className}` : "listing-image-placeholder"}>
+      <Search size={28} />
     </div>
   );
 }
@@ -1946,10 +1993,10 @@ function ListingItemFields({
     <section className="item-fields">
       <div className="subsection-header">
         <div>
-          <span>{text.postItems}</span>
-          <p>{text.postItemsHelp}</p>
+          <span>{isRequestPost(draft) ? text.wantedItems : text.postItems}</span>
+          <p>{isRequestPost(draft) ? text.wantedItemsHelp : text.postItemsHelp}</p>
           <p className="item-total">
-            {text.listingTotal}: ${getDraftItemTotal(draft)}
+            {isRequestPost(draft) ? text.budgetTotal : text.listingTotal}: ${getDraftItemTotal(draft)}
           </p>
         </div>
         <button type="button" className="secondary" onClick={addItem} disabled={!canAddItem}>
@@ -1958,7 +2005,7 @@ function ListingItemFields({
         </button>
       </div>
       {items.map((item, index) => {
-        const complete = isDraftItemComplete(item);
+        const complete = isDraftItemComplete(item, draft);
         const canCollapseItem = collapseCompletedItems && complete;
         const collapsed = collapseCompletedItems && complete && collapsedItemIds.has(item.id);
         const expanded = !collapsed;
@@ -2006,19 +2053,23 @@ function ListingItemFields({
             </div>
               <div className="field-grid item-row-fields" id={fieldsId} hidden={!expanded}>
                 <label>
-                  <span>{text.itemName}</span>
+                  <span>{isRequestPost(draft) ? text.wantedItemName : text.itemName}</span>
                   <input
-                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemName} ${index + 1}`}
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${
+                      isRequestPost(draft) ? text.wantedItemName : text.itemName
+                    } ${index + 1}`}
                     value={item.name}
                     onChange={(event) => updateItem(item.id, { name: event.target.value })}
                   />
                 </label>
                 <label>
-                  <span>{text.itemPrice}</span>
+                  <span>{isRequestPost(draft) ? text.targetBudget : text.itemPrice}</span>
                   <input
-                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemPrice} ${index + 1}`}
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${
+                      isRequestPost(draft) ? text.targetBudget : text.itemPrice
+                    } ${index + 1}`}
                     type="number"
-                    min="1"
+                    min={isRequestPost(draft) ? "0" : "1"}
                     value={item.price ?? ""}
                     onChange={(event) =>
                       updateItem(item.id, {
@@ -2028,16 +2079,21 @@ function ListingItemFields({
                   />
                 </label>
                 <label>
-                  <span>{text.itemCondition}</span>
+                  <span>{isRequestPost(draft) ? text.desiredCondition : text.itemCondition}</span>
                   <select
-                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemCondition} ${index + 1}`}
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${
+                      isRequestPost(draft) ? text.desiredCondition : text.itemCondition
+                    } ${index + 1}`}
                     value={item.condition ?? ""}
                     onChange={(event) =>
                       updateItem(item.id, {
-                        condition: event.target.value as ListingDraft["condition"]
+                        condition: event.target.value
+                          ? (event.target.value as ListingDraft["condition"])
+                          : undefined
                       })
                     }
                   >
+                    {isRequestPost(draft) && <option value="">{text.anyCondition}</option>}
                     {["new", "like_new", "good", "fair"].map((condition) => (
                       <option key={condition} value={condition}>
                         {statusLabel(condition, locale)}
@@ -2046,9 +2102,11 @@ function ListingItemFields({
                   </select>
                 </label>
                 <label>
-                  <span>{text.itemNotes}</span>
+                  <span>{isRequestPost(draft) ? text.referenceNotes : text.itemNotes}</span>
                   <input
-                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${text.itemNotes} ${index + 1}`}
+                    aria-label={`${ariaPrefix ? `${ariaPrefix} ` : ""}${
+                      isRequestPost(draft) ? text.referenceNotes : text.itemNotes
+                    } ${index + 1}`}
                     value={item.notes ?? ""}
                     onChange={(event) => updateItem(item.id, { notes: event.target.value })}
                   />
@@ -2152,20 +2210,24 @@ function SellView({
   const [uploadError, setUploadError] = useState("");
   const [editUploadError, setEditUploadError] = useState("");
   const [editError, setEditError] = useState("");
+  const postType: ListingPostType = activeUser?.role === "buyer" ? "request" : "offer";
 
   useEffect(() => {
     setSellerSetup(getSellerSetup(activeUser));
+    setDraft(createBlankDraft(activeUser?.role === "buyer" ? "request" : "offer"));
   }, [activeUser?.id]);
 
   const sellerListings = activeUser ? listings.filter((listing) => listing.sellerId === activeUser.id) : [];
-  const sellerSetupComplete = Boolean(sellerSetup.pickupArea.trim() && sellerSetup.cancellationPolicy.trim());
+  const sellerSetupComplete =
+    postType === "request" || Boolean(sellerSetup.pickupArea.trim() && sellerSetup.cancellationPolicy.trim());
+  const currentDraft = { ...draft, postType };
   const canPublish =
     sellerSetupComplete &&
-    draft.title.trim() &&
-    draft.description.trim() &&
-    draft.location.trim() &&
-    draft.images.length > 0 &&
-    hasPublishableItems(draft);
+    currentDraft.title.trim() &&
+    currentDraft.description.trim() &&
+    currentDraft.location.trim() &&
+    (postType === "request" || currentDraft.images.length > 0) &&
+    hasPublishableItems(currentDraft);
   const editingListing = sellerListings.find((listing) => listing.id === editingId);
   const canSaveEdit = Boolean(
     editDraft &&
@@ -2175,7 +2237,7 @@ function SellView({
     editDraft.description.trim() &&
     editDraft.category.trim() &&
     editDraft.location.trim() &&
-    editDraft.images.length > 0 &&
+    (editDraft.postType === "request" || editDraft.images.length > 0) &&
     editDraft.images.length <= 6 &&
     hasPublishableItems(editDraft)
   );
@@ -2241,25 +2303,27 @@ function SellView({
         onSubmit={async (event) => {
           event.preventDefault();
           if (!canPublish) return;
-          const created = await onCreate(draft, sellerSetup);
+          const created = await onCreate({ ...draft, postType }, sellerSetup);
           if (created) {
-            setDraft(createBlankDraft());
+            setDraft(createBlankDraft(postType));
           }
         }}
       >
         <div className="section-header">
           <div>
-            <p className="eyebrow">{text.sell}</p>
-            <h1>{text.createListing}</h1>
+            <p className="eyebrow">{postType === "request" ? text.requestPost : text.sell}</p>
+            <h1>{postType === "request" ? text.createRequest : text.createListing}</h1>
           </div>
         </div>
-        <SellerSetupPanel
-          setup={sellerSetup}
-          onChange={setSellerSetup}
-          onSave={() => onSaveSellerSetup(sellerSetup)}
-          complete={sellerSetupComplete}
-          text={text}
-        />
+        {postType === "offer" && (
+          <SellerSetupPanel
+            setup={sellerSetup}
+            onChange={setSellerSetup}
+            onSave={() => onSaveSellerSetup(sellerSetup)}
+            complete={sellerSetupComplete}
+            text={text}
+          />
+        )}
         <label>
           <span>{text.images}</span>
           <input
@@ -2283,7 +2347,7 @@ function SellView({
           {draft.images.length === 0 && (
             <div className="empty-upload">
               <ImagePlus size={26} />
-              <span>{text.addImages}</span>
+              <span>{postType === "request" ? text.addReferenceImages : text.addImages}</span>
             </div>
           )}
         </div>
@@ -2316,15 +2380,15 @@ function SellView({
             rows={5}
           />
         </label>
-        <ListingItemFields draft={draft} onChange={setDraft} text={text} locale={locale} />
+        <ListingItemFields draft={currentDraft} onChange={setDraft} text={text} locale={locale} />
         <button className="primary" disabled={!canPublish}>
           <Package size={18} />
-          {text.publishListing}
+          {postType === "request" ? text.publishRequest : text.publishListing}
         </button>
       </form>
 
       <aside className="panel compact-list">
-        <p className="eyebrow">{text.myListings}</p>
+        <p className="eyebrow">{postType === "request" ? text.myRequests : text.myListings}</p>
         <h2>{activeUser?.name ?? text.accountRequired}</h2>
         {sellerListings.map((listing) => {
           const activeReservation = reservations.find(
@@ -2336,7 +2400,7 @@ function SellView({
 
           return (
             <div className="row listing-management-row" key={listing.id}>
-              <img src={getPrimaryImage(listing)} alt="" />
+              <ListingImagePreview listing={listing} />
               <div>
                 <strong>{listing.title}</strong>
                 <p className="muted">{getListingMetaParts(listing, text).join(" · ")}</p>
@@ -2521,7 +2585,9 @@ function SellView({
             </div>
           );
         })}
-        {sellerListings.length === 0 && <p className="muted">{text.noListings}</p>}
+        {sellerListings.length === 0 && (
+          <p className="muted">{postType === "request" ? text.noRequests : text.noListings}</p>
+        )}
       </aside>
     </section>
   );

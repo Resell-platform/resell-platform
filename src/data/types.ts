@@ -48,6 +48,7 @@ export type UserProfile = {
 
 export type ListingStatus = "available" | "reserved" | "sold" | "paused";
 export type ListingCondition = "new" | "like_new" | "good" | "fair";
+export type ListingPostType = "offer" | "request";
 
 export type ListingImage = {
   id: string;
@@ -73,6 +74,7 @@ export type ListingItem = {
 export type Listing = {
   id: string;
   sellerId: string;
+  postType: ListingPostType;
   title: string;
   description: string;
   price: number;
@@ -163,6 +165,7 @@ export type AppState = {
 };
 
 export type ListingDraft = {
+  postType: ListingPostType;
   title: string;
   description: string;
   price: number;

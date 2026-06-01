@@ -51,6 +51,7 @@ type UserRow = {
 type ListingRow = {
   id: string;
   seller_id: string;
+  post_type?: Listing["postType"] | null;
   title: string;
   description: string;
   price: number;
@@ -316,10 +317,11 @@ export async function createListingInDb(env: Env, sellerId: string, draft: Listi
   if (!seller) {
     throw new ApiError("Log in to create listings.", 401);
   }
-  if (!isSellerReady(seller)) {
+  if (seller.role === "seller" && !isSellerReady(seller)) {
     throw new ApiError("Complete seller setup before publishing a listing.", 403);
   }
-  validateListingDraft(draft);
+  const postType: Listing["postType"] = seller.role === "buyer" ? "request" : "offer";
+  validateListingDraft({ ...draft, postType });
 
   const now = new Date().toISOString();
   const listingId = createId("listing");
@@ -333,12 +335,13 @@ export async function createListingInDb(env: Env, sellerId: string, draft: Listi
     db
       .prepare(
         `INSERT INTO listings (
-          id, seller_id, title, description, price, category, condition, location, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'available', ?, ?)`
+          id, seller_id, post_type, title, description, price, category, condition, location, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', ?, ?)`
       )
       .bind(
         listingId,
         sellerId,
+        postType,
         draft.title.trim(),
         draft.description.trim(),
         listingPrice,
@@ -477,15 +480,18 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
 export async function reserveListingInDb(db: D1Database, listingId: string, buyerId: string) {
   const listing = await db.prepare("SELECT * FROM listings WHERE id = ?").bind(listingId).first<ListingRow>();
   if (!listing) throw new ApiError("Listing not found.", 404);
-  if (listing.seller_id === buyerId) throw new ApiError("Sellers cannot reserve their own listings.", 403);
-  if (listing.status !== "available") throw new ApiError("Listing is not available for new buyer interest.", 409);
+  if (listing.seller_id === buyerId) throw new ApiError("You cannot respond to your own post.", 403);
+  if (listing.status !== "available") throw new ApiError("Post is not available for new interest.", 409);
+  const isRequestPost = listing.post_type === "request";
+  const reservationBuyerId = isRequestPost ? listing.seller_id : buyerId;
+  const reservationSellerId = isRequestPost ? buyerId : listing.seller_id;
 
   const existing = await db
     .prepare(
       `SELECT id
        FROM reservations
        WHERE listing_id = ?
-         AND buyer_id = ?
+         AND ${isRequestPost ? "seller_id" : "buyer_id"} = ?
          AND status IN ('requested', 'awaiting_payment', 'payment_sent', 'overdue')
        LIMIT 1`
     )
@@ -504,16 +510,27 @@ export async function reserveListingInDb(db: D1Database, listingId: string, buye
           id, listing_id, buyer_id, seller_id, status, payment_due_at, created_at, updated_at
         ) VALUES (?, ?, ?, ?, 'requested', ?, ?, ?)`
 	      )
-	      .bind(reservationId, listingId, buyerId, listing.seller_id, holdExpiresAt, now.toISOString(), now.toISOString()),
+	      .bind(
+	        reservationId,
+	        listingId,
+	        reservationBuyerId,
+	        reservationSellerId,
+	        holdExpiresAt,
+	        now.toISOString(),
+	        now.toISOString()
+	      ),
 	    db
 	      .prepare(
 	        `INSERT INTO notifications (id, user_id, type, title, body, entity_id, created_at)
-	         VALUES (?, ?, 'reservation_created', 'New buyer interest', ?, ?, ?)`
+	         VALUES (?, ?, 'reservation_created', ?, ?, ?, ?)`
 	      )
 	      .bind(
 	        createId("notification"),
 	        listing.seller_id,
-	        `${await getUserName(db, buyerId)} is interested in ${listing.title}.`,
+	        isRequestPost ? "New request response" : "New buyer interest",
+	        isRequestPost
+	          ? `${await getUserName(db, buyerId)} replied to your request for ${listing.title}.`
+	          : `${await getUserName(db, buyerId)} is interested in ${listing.title}.`,
 	        reservationId,
 	        now.toISOString()
 	      )
@@ -901,6 +918,7 @@ function normalizeListingFromRow(row: ListingRow, images: ListingImage[], items:
   const listing: Listing = {
     id: row.id,
     sellerId: row.seller_id,
+    postType: row.post_type === "request" ? "request" : "offer",
     title: row.title,
     description: row.description,
     price: row.price,
@@ -945,6 +963,7 @@ function normalizeDraftItems(draft: ListingDraft, listingId: string, createdAt: 
   const listing: Listing = {
     id: listingId,
     sellerId: "",
+    postType: draft.postType ?? "offer",
     title: draft.title,
     description: draft.description,
     price: draft.price,
@@ -1010,6 +1029,7 @@ function getListingSummaryCondition(items: ListingItem[]): ListingCondition {
 function validateListingDraft(draft: ListingDraft) {
   const items = normalizeDraftItems(draft, "validation-listing", new Date().toISOString());
   const rawItems = draftItems(draft);
+  const isRequest = draft.postType === "request";
   if (
     !draft.title.trim() ||
     !draft.description.trim() ||
@@ -1018,8 +1038,8 @@ function validateListingDraft(draft: ListingDraft) {
   ) {
     throw new ApiError("Listing title, description, location, and category are required.");
   }
-  if (draft.images.length === 0 || draft.images.length > 6) {
-    throw new ApiError("Listings must include 1-6 images.");
+  if ((!isRequest && draft.images.length === 0) || draft.images.length > 6) {
+    throw new ApiError(isRequest ? "Posts can include up to 6 images." : "Listings must include 1-6 images.");
   }
   if (rawItems.length === 0) {
     throw new ApiError("Listings must include at least one item.");
@@ -1030,10 +1050,10 @@ function validateListingDraft(draft: ListingDraft) {
   if (rawItems.some((item) => !item.name?.trim())) {
     throw new ApiError("Every listing item must include a name.");
   }
-  if (rawItems.some((item) => !Number.isFinite(item.price) || Number(item.price) <= 0)) {
+  if (!isRequest && rawItems.some((item) => !Number.isFinite(item.price) || Number(item.price) <= 0)) {
     throw new ApiError("Every listing item must include a price.");
   }
-  if (rawItems.some((item) => !item.condition || !LISTING_CONDITIONS.has(item.condition))) {
+  if (!isRequest && rawItems.some((item) => !item.condition || !LISTING_CONDITIONS.has(item.condition))) {
     throw new ApiError("Every listing item must include a valid condition.");
   }
   if (items.length === 0) {
