@@ -152,6 +152,38 @@ export type Notification = {
   createdAt: string;
 };
 
+export type FeedbackCategory = "bug" | "suggestion" | "listing" | "handoff" | "safety" | "trust";
+export type FeedbackSeverity = "low" | "medium" | "blocking" | "safety";
+export type FeedbackTriageStatus =
+  | "submitted"
+  | "processing"
+  | "issue_created"
+  | "triage_failed"
+  | "duplicate"
+  | "needs_more_info";
+
+export type FeedbackDraft = {
+  category: FeedbackCategory;
+  severity: FeedbackSeverity;
+  summary: string;
+  details: string;
+  contactAllowed: boolean;
+  contactEmail?: string;
+  sourceView: string;
+  entityType?: "listing" | "reservation";
+  entityId?: string;
+  pageUrl?: string;
+  locale?: string;
+  dataSource?: string;
+  honeypot?: string;
+};
+
+export type FeedbackReceipt = {
+  id: string;
+  status: FeedbackTriageStatus;
+  createdAt: string;
+};
+
 export type AppState = {
   users: User[];
   activeUserId: string;

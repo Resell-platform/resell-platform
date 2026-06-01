@@ -1,5 +1,7 @@
 import type {
   AppState,
+  FeedbackDraft,
+  FeedbackReceipt,
   ListingDraft,
   ListingStatus,
   Message,
@@ -164,6 +166,13 @@ export async function createRemoteListing(draft: ListingDraft): Promise<AppState
   return apiRequest<AppState>("/api/listings", {
     method: "POST",
     body: JSON.stringify({ draft })
+  });
+}
+
+export async function submitRemoteFeedback(draft: FeedbackDraft): Promise<FeedbackReceipt> {
+  return apiRequest<FeedbackReceipt>("/api/feedback", {
+    method: "POST",
+    body: JSON.stringify(draft)
   });
 }
 

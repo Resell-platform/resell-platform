@@ -371,6 +371,47 @@ describe("App user flows", () => {
     expect(window.localStorage.getItem("resell-text-scale")).toBe("large");
   });
 
+  it("opens the local feedback form, validates details, and stores the submission", async () => {
+    render(<App />);
+
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^feedback$/i }));
+
+    expect(screen.getByRole("heading", { name: /send feedback/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /send feedback/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/short summary/i), { target: { value: "Filters reset unexpectedly" } });
+    expect(screen.getByRole("button", { name: /send feedback/i })).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText(/details/i), {
+      target: { value: "The category filter clears when I return to Browse." }
+    });
+    fireEvent.click(screen.getByRole("button", { name: /send feedback/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("heading", { name: /send feedback/i })).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/feedback sent/i)).toBeInTheDocument();
+
+    const stored = JSON.parse(window.localStorage.getItem("resell-platform:feedback:v1") ?? "[]") as Array<{
+      summary: string;
+      sourceView: string;
+    }>;
+    expect(stored[0]).toMatchObject({
+      summary: "Filters reset unexpectedly",
+      sourceView: "browse"
+    });
+  });
+
+  it("opens feedback from the mobile settings sheet", () => {
+    stubNarrowLayout(true);
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^feedback$/i }));
+
+    expect(screen.getByRole("heading", { name: /send feedback/i })).toBeInTheDocument();
+  });
+
   it("collapses and expands the desktop sidebar", () => {
     const { container } = render(<App />);
 
@@ -879,6 +920,9 @@ function mockCloudflareSession(user: User | null, state: AppState = cloudflarePu
         moderationStatuses: ["pending", "approved", "rejected", "flagged"],
         state
       });
+    }
+    if (path.endsWith("/api/feedback") && init?.method === "POST") {
+      return jsonResponse({ id: "feedback-1", status: "submitted", createdAt: "2026-06-01T00:00:00.000Z" }, 201);
     }
     if (path.includes("/api/listings/") && init?.method === "PATCH") {
       return jsonResponse(state);

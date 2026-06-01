@@ -26,6 +26,7 @@ export type Env = {
   LISTING_IMAGES?: R2Bucket;
   RESEND_API_KEY?: string;
   AUTH_EMAIL_FROM?: string;
+  FEEDBACK_HASH_SALT?: string;
 };
 
 type UserRow = {

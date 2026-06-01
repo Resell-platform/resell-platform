@@ -1,3 +1,5 @@
+import { triageFeedbackSubmissions } from "./feedbackTriage";
+
 type BroadcastResponse = {
   ok: true;
   delivered: number;
@@ -5,6 +7,8 @@ type BroadcastResponse = {
 
 type Env = {
   DB: D1Database;
+  GITHUB_TOKEN?: string;
+  GITHUB_REPO?: string;
 };
 
 export class ChatUserHub {
@@ -69,9 +73,19 @@ export default {
     return new Response("Not found", { status: 404 });
   },
   async scheduled(_controller: ScheduledController, env: Env) {
-    await expireReservationHolds(env.DB);
+    await runScheduledMaintenance(env);
   }
 };
+
+async function runScheduledMaintenance(env: Env) {
+  const tasks = [expireReservationHolds(env.DB), triageFeedbackSubmissions(env)];
+  const results = await Promise.allSettled(tasks);
+  for (const result of results) {
+    if (result.status === "rejected") {
+      console.error(result.reason);
+    }
+  }
+}
 
 async function expireReservationHolds(db: D1Database) {
   const now = new Date().toISOString();
