@@ -7,6 +7,9 @@ binding = "DB"
 database_name = "resell-platform-db"
 database_id = "c98b0503-52e1-4cac-ba21-fede0bb57d78"
 
+[vars]
+GITHUB_REPO = "Resell-platform/resell-platform"
+
 [triggers]
 crons = ["*/5 * * * *"]
 

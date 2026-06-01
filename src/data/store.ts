@@ -5,6 +5,8 @@ import {
   type AccountActionError,
   type AccountActionResult,
   type AppState,
+  type FeedbackDraft,
+  type FeedbackReceipt,
   type Listing,
   type ListingCondition,
   type ListingDraft,
@@ -20,6 +22,7 @@ import {
 } from "./types";
 
 const STORAGE_KEY = "resell-platform:v1";
+const FEEDBACK_STORAGE_KEY = "resell-platform:feedback:v1";
 const STORAGE_VERSION = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MIN_PASSWORD_LENGTH = 8;
@@ -74,6 +77,47 @@ export function saveState(state: AppState): void {
 
 export function resetState(): AppState {
   return stateResource.reset().data;
+}
+
+export function saveLocalFeedback(draft: FeedbackDraft): FeedbackReceipt {
+  const now = new Date().toISOString();
+  const receipt: FeedbackReceipt = {
+    id: createId("feedback"),
+    status: "submitted",
+    createdAt: now
+  };
+  const existing = readLocalFeedbackRecords();
+  window.localStorage.setItem(
+    FEEDBACK_STORAGE_KEY,
+    JSON.stringify([
+      {
+        ...receipt,
+        category: draft.category,
+        severity: draft.severity,
+        summary: draft.summary.trim(),
+        details: draft.details.trim(),
+        contactAllowed: draft.contactAllowed,
+        contactEmail: draft.contactEmail?.trim() || undefined,
+        sourceView: draft.sourceView,
+        entityType: draft.entityType,
+        entityId: draft.entityId,
+        pageUrl: draft.pageUrl,
+        locale: draft.locale,
+        dataSource: draft.dataSource
+      },
+      ...existing
+    ])
+  );
+  return receipt;
+}
+
+function readLocalFeedbackRecords(): unknown[] {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(FEEDBACK_STORAGE_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 export function getPrimaryImage(listing: Listing): string | undefined {

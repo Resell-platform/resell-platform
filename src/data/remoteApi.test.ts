@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildRealtimeSocketUrl, requestRemoteEmailCode } from "./remoteApi";
+import { buildRealtimeSocketUrl, requestRemoteEmailCode, submitRemoteFeedback } from "./remoteApi";
 
 describe("remote API errors", () => {
   afterEach(() => {
@@ -33,6 +33,34 @@ describe("remote API errors", () => {
     );
     expect(buildRealtimeSocketUrl({ protocol: "http:", host: "localhost:8791" })).toBe(
       "ws://localhost:8791/api/realtime"
+    );
+  });
+
+  it("posts feedback to the same-origin API with credentials", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: "feedback-1", status: "submitted", createdAt: "2026-06-01T00:00:00.000Z" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      submitRemoteFeedback({
+        category: "bug",
+        severity: "medium",
+        summary: "Search filters reset",
+        details: "The selected category disappears after refresh.",
+        contactAllowed: false,
+        sourceView: "browse",
+        pageUrl: "https://loopvoro.com/",
+        locale: "en",
+        dataSource: "cloudflare"
+      })
+    ).resolves.toMatchObject({ id: "feedback-1", status: "submitted" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/feedback",
+      expect.objectContaining({
+        method: "POST",
+        credentials: "include",
+        body: expect.stringContaining("Search filters reset")
+      })
     );
   });
 });

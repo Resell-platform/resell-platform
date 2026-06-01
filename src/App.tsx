@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   Bell,
   CalendarClock,
@@ -32,6 +32,7 @@ import {
   loadState,
   reserveListing,
   resetState,
+  saveLocalFeedback,
   saveState,
   sendMessage,
   updateListingDetails,
@@ -50,6 +51,7 @@ import {
   markRemoteNotificationsRead,
   reserveRemoteListing,
   sendRemoteMessage,
+  submitRemoteFeedback,
   updateRemoteListing,
   updateRemoteListingStatus,
   updateRemoteProfile,
@@ -61,6 +63,7 @@ import {
 import {
   MAX_LISTING_ITEMS,
   type AppState,
+  type FeedbackDraft,
   type Listing,
   type ListingDraft,
   type ListingItem,
@@ -464,6 +467,7 @@ export default function App() {
   const [view, setView] = useState<View>("browse");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileSettingsOpen, setMobileSettingsOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [textScale, setTextScale] = useState<TextScale>(getInitialTextScale);
   const [selectedListingId, setSelectedListingId] = useState<string | null>("listing-1");
   const [selectedReservationId, setSelectedReservationId] = useState<string | null>("reservation-1");
@@ -717,6 +721,13 @@ export default function App() {
   ).length;
   const cancellationReservation =
     userReservations.find((reservation) => reservation.id === cancellationRequestId) ?? null;
+  const feedbackSourceLabel: Record<View, string> = {
+    browse: text.browseFeedbackSource,
+    sell: text.sellFeedbackSource,
+    orders: text.ordersFeedbackSource,
+    chat: text.chatFeedbackSource,
+    notifications: text.notificationsFeedbackSource
+  };
 
   function update(nextState: AppState) {
     setState(computeHoldExpirationNotifications(nextState));
@@ -976,6 +987,39 @@ export default function App() {
     setAuthMessage(text.alertsUnavailable);
   }
 
+  async function handleSubmitFeedback(
+    draft: Omit<FeedbackDraft, "sourceView" | "entityType" | "entityId" | "pageUrl" | "locale" | "dataSource">
+  ) {
+    const feedbackDraft: FeedbackDraft = {
+      ...draft,
+      sourceView: view,
+      entityType:
+        view === "browse" && selectedListing
+          ? "listing"
+          : (view === "orders" || view === "chat") && selectedReservation
+            ? "reservation"
+            : undefined,
+      entityId:
+        view === "browse" && selectedListing
+          ? selectedListing.id
+          : (view === "orders" || view === "chat") && selectedReservation
+            ? selectedReservation.id
+            : undefined,
+      pageUrl: window.location.href,
+      locale,
+      dataSource
+    };
+
+    if (dataSource === "cloudflare") {
+      await submitRemoteFeedback(feedbackDraft);
+    } else {
+      saveLocalFeedback(feedbackDraft);
+    }
+
+    setFeedbackOpen(false);
+    setAuthMessage(text.feedbackSent);
+  }
+
   const textScaleLabels: Record<TextScale, string> = {
     compact: text.compactText,
     default: text.defaultText,
@@ -1049,6 +1093,19 @@ export default function App() {
             />
           )}
         </nav>
+        {!isNarrowLayout && (
+          <button
+            className="nav feedback-nav"
+            type="button"
+            onClick={() => {
+              setMobileSettingsOpen(false);
+              setFeedbackOpen(true);
+            }}
+          >
+            <MessageSquare />
+            <span>{text.feedback}</span>
+          </button>
+        )}
         {!isNarrowLayout && dataSource === "local" && (
           <button className="ghost reset" onClick={() => setState(computeHoldExpirationNotifications(resetState()))}>
             <RefreshCcw size={16} />
@@ -1119,6 +1176,17 @@ export default function App() {
                 ))}
               </div>
             </div>
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => {
+                setFeedbackOpen(true);
+                setMobileSettingsOpen(false);
+              }}
+            >
+              <MessageSquare size={16} />
+              {text.feedback}
+            </button>
             {dataSource === "local" ? (
               <>
                 <UserSwitcher state={state} setState={setState} text={text} />
@@ -1187,6 +1255,7 @@ export default function App() {
           />
         ) : null}
         {actionError && <p className="global-error">{actionError}</p>}
+        {authMessage && (dataSource === "local" || isNarrowLayout) && <p className="global-message">{authMessage}</p>}
         {view === "browse" && (
           <BrowseView
             listings={visibleListings}
@@ -1306,6 +1375,15 @@ export default function App() {
           activeUserId={activeUser?.id ?? ""}
           onClose={() => setCancellationRequestId(null)}
           onConfirm={handleCancelReservation}
+          text={text}
+        />
+      )}
+      {feedbackOpen && (
+        <FeedbackModal
+          user={activeUser}
+          sourceLabel={feedbackSourceLabel[view]}
+          onClose={() => setFeedbackOpen(false)}
+          onSubmit={handleSubmitFeedback}
           text={text}
         />
       )}
@@ -2901,6 +2979,148 @@ function ChatView({
         )}
       </div>
     </section>
+  );
+}
+
+function FeedbackModal({
+  user,
+  sourceLabel,
+  onClose,
+  onSubmit,
+  text
+}: {
+  user?: User | null;
+  sourceLabel: string;
+  onClose: () => void;
+  onSubmit: (
+    draft: Omit<FeedbackDraft, "sourceView" | "entityType" | "entityId" | "pageUrl" | "locale" | "dataSource">
+  ) => Promise<void>;
+  text: Copy;
+}) {
+  const contactEmail = (user as (User & { email?: string }) | null | undefined)?.email ?? "";
+  const [category, setCategory] = useState<FeedbackDraft["category"]>("bug");
+  const [severity, setSeverity] = useState<FeedbackDraft["severity"]>("medium");
+  const [summary, setSummary] = useState("");
+  const [details, setDetails] = useState("");
+  const [contactAllowed, setContactAllowed] = useState(Boolean(contactEmail));
+  const [email, setEmail] = useState(contactEmail);
+  const [honeypot, setHoneypot] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const canSubmit = Boolean(summary.trim() && details.trim() && !pending);
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    if (!canSubmit) return;
+    setPending(true);
+    setError("");
+    try {
+      await onSubmit({
+        category,
+        severity,
+        summary,
+        details,
+        contactAllowed,
+        contactEmail: email,
+        honeypot
+      });
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : text.feedbackFailed);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <form
+        className="modal feedback-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="feedback-title"
+        onSubmit={submit}
+      >
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">
+              {text.feedbackSource}: {sourceLabel}
+            </p>
+            <h1 id="feedback-title">{text.feedbackTitle}</h1>
+          </div>
+          <button className="secondary icon-button" type="button" aria-label={text.closeModal} onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="feedback-grid">
+          <label>
+            <span>{text.feedbackType}</span>
+            <select
+              value={category}
+              onChange={(event) => setCategory(event.target.value as FeedbackDraft["category"])}
+            >
+              <option value="bug">{text.feedbackBug}</option>
+              <option value="suggestion">{text.feedbackSuggestion}</option>
+              <option value="listing">{text.feedbackListing}</option>
+              <option value="handoff">{text.feedbackHandoff}</option>
+              <option value="safety">{text.feedbackSafety}</option>
+              <option value="trust">{text.feedbackTrust}</option>
+            </select>
+          </label>
+          <label>
+            <span>{text.feedbackSeverity}</span>
+            <select
+              value={severity}
+              onChange={(event) => setSeverity(event.target.value as FeedbackDraft["severity"])}
+            >
+              <option value="low">{text.feedbackLow}</option>
+              <option value="medium">{text.feedbackMedium}</option>
+              <option value="blocking">{text.feedbackBlocking}</option>
+              <option value="safety">{text.feedbackSafetyConcern}</option>
+            </select>
+          </label>
+        </div>
+        <label>
+          <span>{text.feedbackSummary}</span>
+          <input maxLength={140} value={summary} onChange={(event) => setSummary(event.target.value)} />
+        </label>
+        <label>
+          <span>{text.feedbackDetails}</span>
+          <textarea rows={5} maxLength={4000} value={details} onChange={(event) => setDetails(event.target.value)} />
+        </label>
+        <label className="feedback-contact">
+          <input
+            type="checkbox"
+            checked={contactAllowed}
+            onChange={(event) => setContactAllowed(event.target.checked)}
+          />
+          <span>{text.feedbackContact}</span>
+        </label>
+        {contactAllowed && (
+          <label>
+            <span>{text.feedbackContactEmail}</span>
+            <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+          </label>
+        )}
+        <label className="feedback-honeypot" aria-hidden="true">
+          <span>Website</span>
+          <input
+            tabIndex={-1}
+            autoComplete="off"
+            value={honeypot}
+            onChange={(event) => setHoneypot(event.target.value)}
+          />
+        </label>
+        {error && <p className="form-error">{error}</p>}
+        <div className="button-row modal-actions">
+          <button type="button" className="secondary" onClick={onClose} disabled={pending}>
+            {text.cancel}
+          </button>
+          <button type="submit" className="primary" disabled={!canSubmit}>
+            {pending ? text.feedbackSending : text.feedbackSend}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 

@@ -44,6 +44,7 @@ npm run build
 - The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and reservation coordination.
 - Logged-in users can export their account, seller listings, listing items, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
 - Reservation holds expire 24 hours after reservation. `/api/state` and the scheduled realtime Worker create idempotent buyer/seller hold-expiration notifications.
+- Users can send structured feedback from the web app. Cloudflare mode stores feedback in D1, and scheduled Worker maintenance can convert submitted feedback into GitHub issues.
 - Plain local demo users can be switched from the left navigation on desktop. Cloudflare mode uses account login instead.
 
 ## Current Limits
@@ -67,6 +68,7 @@ The repository is configured for Cloudflare Pages Functions, D1, and R2:
 - Durable Object binding: `CHAT_USER_HUB`
 - R2 binding: `LISTING_IMAGES` after R2 is enabled on the Cloudflare account
 - Required auth secrets/env vars: `RESEND_API_KEY`, `AUTH_EMAIL_FROM`
+- Required feedback secrets/env vars: Pages `FEEDBACK_HASH_SALT`; scheduled Worker `GITHUB_TOKEN` and `GITHUB_REPO`
 
 Create the Cloudflare resources:
 
@@ -93,6 +95,8 @@ Configure Resend before deploying email login:
 ```bash
 npx wrangler pages secret put RESEND_API_KEY --project-name resell-platform
 npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
+npx wrangler pages secret put FEEDBACK_HASH_SALT --project-name resell-platform
+npx wrangler secret put GITHUB_TOKEN --config workers/realtime/wrangler.toml
 ```
 
 `AUTH_EMAIL_FROM` must be a sender address allowed by the Resend account, for example `Resell <login@your-verified-domain.com>`.
@@ -113,6 +117,15 @@ npm run deploy
 - Chat writes messages to D1 after checking the sender is the reservation buyer or seller, then broadcasts a realtime event through the per-user `ChatUserHub` Durable Object so connected tabs refresh immediately.
 - When the `LISTING_IMAGES` R2 binding is configured, new listing uploads store image bytes in R2 and D1 stores the served image path plus R2 key.
 - Until R2 is enabled, the Functions fallback stores uploaded image data URLs in D1 so the platform can still run with a real shared database.
+
+## Operating Workflows
+
+- Feedback loop: users submit categorized feedback in the app, D1 stores it as the canonical inbox, and scheduled maintenance creates privacy-redacted GitHub issues for triage.
+- Launch readiness: verify D1/R2, Resend email login, listing image upload, reservation chat, export, and realtime Worker deployment before opening buyer traffic.
+- Seller activation: guide users through profile completion, first listing, first buyer conversation, and completed handoff.
+- Buyer activation: guide users through browse/filter, contact seller, chat, and handoff planning.
+- Support queue: review expired holds, cancellations, safety/trust feedback, no-response reports, and handoff changes.
+- Growth loops: use request posts, curated category liquidity checks, seasonal move-in/move-out campaigns, and bilingual group sharing.
 
 ## Product Architecture
 
