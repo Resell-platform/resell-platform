@@ -1024,7 +1024,7 @@ export default function App() {
           />
           <NavButton
             icon={<Upload />}
-            label={text.sell}
+            label={text.post}
             active={view === "sell"}
             onClick={() => openProtectedView("sell", text.loginSellAction)}
           />

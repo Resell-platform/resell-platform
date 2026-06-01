@@ -40,7 +40,7 @@ export const copy = {
     imageReadFailed: "One image could not be read. Try a different file.",
     listingUpdateFailed: "This listing could not be updated.",
     browse: "Browse",
-    sell: "Sell / request",
+    sell: "Sell",
     post: "Post",
     picked: "Reservations",
     chat: "Chat",

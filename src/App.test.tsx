@@ -60,7 +60,7 @@ describe("App user flows", () => {
   it("creates a single-item listing after tracking multi-image upload and removal state", async () => {
     const { container } = render(<App />);
 
-	    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+	    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
 	    fillSellerSetup();
 	    expect(screen.queryByLabelText(/response expectation/i)).not.toBeInTheDocument();
 	    expect(screen.queryByLabelText(/off-platform instructions/i)).not.toBeInTheDocument();
@@ -104,7 +104,7 @@ describe("App user flows", () => {
     expect(screen.getAllByText(/1 item/i)).not.toHaveLength(0);
     expect(screen.getAllByText("Brass desk lamp")).not.toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const createdRow = screen.getByText("Test lamp").closest(".listing-management-row");
     expect(createdRow).not.toBeNull();
     fireEvent.click(within(createdRow as HTMLElement).getByRole("button", { name: /edit/i }));
@@ -119,7 +119,7 @@ describe("App user flows", () => {
   it("creates a multi-item listing after adding individual item rows", async () => {
     const { container } = render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     fillSellerSetup();
     fireEvent.change(screen.getByLabelText(/images/i), {
       target: { files: [new File(["bundle"], "bundle.png", { type: "image/png" })] }
@@ -259,7 +259,7 @@ describe("App user flows", () => {
     stubNarrowLayout();
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     expect(screen.getByLabelText(/item name 1/i)).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(/item name 1/i), { target: { value: "Brass desk lamp" } });
@@ -357,7 +357,7 @@ describe("App user flows", () => {
 
     const navigation = screen.getByLabelText(/primary navigation/i);
 
-    for (const label of ["Browse", "Sell", "Handoffs", "Chat"]) {
+    for (const label of ["Browse", "Post", "Handoffs", "Chat"]) {
       expect(within(navigation).getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
     expect(within(navigation).queryByRole("button", { name: /alerts/i })).not.toBeInTheDocument();
@@ -387,7 +387,7 @@ describe("App user flows", () => {
     window.dispatchEvent(new Event("resize"));
     const { container } = render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     fillSellerSetup();
     fireEvent.change(screen.getByLabelText(/images/i), {
       target: { files: [new File(["mobile"], "mobile.png", { type: "image/png" })] }
@@ -408,7 +408,7 @@ describe("App user flows", () => {
 
     expect(await screen.findAllByRole("heading", { name: "Mobile floor lamp" })).not.toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const deskRow = screen.getByText("Walnut writing desk").closest(".listing-management-row");
     expect(deskRow).not.toBeNull();
     fireEvent.click(within(deskRow as HTMLElement).getByRole("button", { name: /edit/i }));
@@ -429,14 +429,14 @@ describe("App user flows", () => {
     fireEvent.change(screen.getAllByLabelText(/language/i)[0], { target: { value: "zh" } });
 
     expect(screen.getByRole("button", { name: /浏览/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /出售/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /发布/i })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: /从本地卖家处选购商品/i })).toBeInTheDocument();
   });
 
   it("lets the local seller manage listing status from My listings", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const deskStatus = screen.getByLabelText(/status for walnut writing desk/i);
 
     expect(deskStatus).toHaveValue("available");
@@ -455,7 +455,7 @@ describe("App user flows", () => {
   it("lets the local seller edit owned listing details from My listings", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const deskRow = screen.getByText("Walnut writing desk").closest(".listing-management-row");
     expect(deskRow).not.toBeNull();
     fireEvent.click(within(deskRow as HTMLElement).getByRole("button", { name: /edit/i }));
@@ -481,7 +481,7 @@ describe("App user flows", () => {
   it("keeps buyer conversations from blocking seller edits", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
     expect(within(cameraRow as HTMLElement).getByRole("button", { name: /edit/i })).not.toBeDisabled();
@@ -497,7 +497,7 @@ describe("App user flows", () => {
   it("links a local seller's buyer conversation to chat and handoff workflow", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
 
@@ -508,7 +508,7 @@ describe("App user flows", () => {
     expect(screen.getByRole("heading", { name: "Mirrorless camera kit" })).toBeInTheDocument();
     expect(screen.getByText(/i can pick up tomorrow/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const refreshedCameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(refreshedCameraRow).not.toBeNull();
     fireEvent.click(within(refreshedCameraRow as HTMLElement).getByRole("button", { name: /open handoff/i }));
@@ -521,7 +521,7 @@ describe("App user flows", () => {
   it("lets the local seller complete a handoff from My listings", () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
 
@@ -534,7 +534,7 @@ describe("App user flows", () => {
   it("lets the local seller cancel a buyer conversation from My listings", async () => {
     render(<App />);
 
-    fireEvent.click(screen.getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
 
@@ -588,13 +588,13 @@ describe("App user flows", () => {
     );
   });
 
-  it("prompts login immediately when a logged-out visitor clicks Sell", async () => {
+  it("prompts login immediately when a logged-out visitor clicks Post", async () => {
     mockCloudflareSession(null);
 
     render(<App />);
 
     await screen.findAllByText("Cloudflare D1");
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
 
     expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
     expect(screen.getAllByText(/log in with email to sell a listing/i)).not.toHaveLength(0);
@@ -620,7 +620,7 @@ describe("App user flows", () => {
     render(<App />);
 
     await screen.findAllByText("Cloudflare D1");
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const deskRow = await screen.findByText("Walnut writing desk");
     fireEvent.click(within(deskRow.closest(".listing-management-row") as HTMLElement).getByRole("button", { name: /edit/i }));
     fireEvent.change(screen.getByLabelText(/edit title for walnut writing desk/i), {
@@ -653,7 +653,7 @@ describe("App user flows", () => {
     const { container } = render(<App />);
 
     await screen.findAllByText("Cloudflare D1");
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     fillSellerSetup();
     fireEvent.change(screen.getByLabelText(/images/i), {
       target: { files: [new File(["chair"], "chair.png", { type: "image/png" })] }
@@ -700,7 +700,7 @@ describe("App user flows", () => {
     render(<App />);
 
     await screen.findAllByText("Cloudflare D1");
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = (await screen.findByText("Mirrorless camera kit")).closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
     expect(within(cameraRow as HTMLElement).getByText(/buyer jordan lee/i)).toBeInTheDocument();
@@ -710,7 +710,7 @@ describe("App user flows", () => {
     expect(screen.getByRole("heading", { name: /handoffs and buyer conversations/i })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const refreshedCameraRow = screen.getByText("Mirrorless camera kit").closest(".listing-management-row");
     expect(refreshedCameraRow).not.toBeNull();
     fireEvent.click(within(refreshedCameraRow as HTMLElement).getByRole("button", { name: /open chat/i }));
@@ -771,7 +771,7 @@ describe("App user flows", () => {
     render(<App />);
 
     await screen.findAllByText("Cloudflare D1");
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = (await screen.findByText("Mirrorless camera kit")).closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
 
@@ -845,7 +845,7 @@ describe("App user flows", () => {
 
     expect(await screen.findByText("API down")).toBeInTheDocument();
     expect(screen.queryByText("Local demo")).not.toBeInTheDocument();
-    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /sell/i }));
+    fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
 
     expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /publish listing/i })).not.toBeInTheDocument();
