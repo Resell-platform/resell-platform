@@ -8,8 +8,8 @@
   --page-gap: clamp(12px, 1.5vw, 22px);
   --panel-gap: clamp(12px, 1.25vw, 18px);
   --panel-padding: clamp(14px, 1.25vw, 18px);
-  --font-body: 1rem;
-  --font-small: 0.84rem;
+  --font-body: 1.05rem;
+  --font-small: 0.9rem;
   --font-heading: 2rem;
   --font-subheading: 1.12rem;
   --sidebar-width: clamp(232px, 18vw, 260px);
@@ -57,7 +57,7 @@ button:disabled {
 
 .app.text-scale-compact {
   --font-body: 1rem;
-  --font-small: 0.8rem;
+  --font-small: 0.84rem;
   --font-heading: 1.82rem;
   --font-subheading: 1.04rem;
 }
@@ -249,6 +249,27 @@ button:disabled {
 
 .account-actions {
   grid-template-columns: 1fr 1fr;
+}
+
+.desktop-account-bar {
+  max-width: 1360px;
+  margin: 0 auto var(--panel-gap);
+  grid-template-columns: minmax(220px, auto) minmax(240px, 1fr) auto auto;
+  align-items: end;
+}
+
+.desktop-account-bar.signed-in {
+  grid-template-columns: minmax(260px, 1fr) auto;
+  align-items: center;
+}
+
+.desktop-account-bar > p {
+  align-self: center;
+}
+
+.desktop-account-bar .account-heading,
+.desktop-account-bar .account-message {
+  align-self: center;
 }
 
 .user-switcher {
@@ -596,6 +617,15 @@ h2 {
   background: #eef1ec;
 }
 
+.listing-image-placeholder {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  display: grid;
+  place-items: center;
+  background: #eef1ec;
+  color: #65727c;
+}
+
 .listing-card div {
   padding: 12px;
 }
@@ -604,6 +634,23 @@ h2 {
 .price {
   font-weight: 900;
   color: #176b5b;
+}
+
+.post-type-badge {
+  display: inline-block;
+  width: fit-content;
+  margin-left: 6px;
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 900;
+  color: #172026;
+  background: #e8ede8;
+}
+
+.post-type-badge.request {
+  background: #dbeafe;
+  color: #1e3a8a;
 }
 
 .item-count {
@@ -873,6 +920,14 @@ label {
 .listing-management-row > div {
   min-width: 0;
   flex: 1 1 150px;
+}
+
+.listing-management-row > .listing-image-placeholder {
+  width: 58px;
+  height: 58px;
+  aspect-ratio: auto;
+  flex: 0 0 auto;
+  border-radius: 8px;
 }
 
 .status-control {
@@ -1433,7 +1488,8 @@ label {
     align-items: start;
   }
 
-  .listing-management-row > img {
+  .listing-management-row > img,
+  .listing-management-row > .listing-image-placeholder {
     width: 72px;
     height: 72px;
   }

@@ -116,12 +116,13 @@ export function updateSellerSetup(state: AppState, sellerId: string, draft: Sell
 
 function isValidListingDraft(draft: ListingDraft): boolean {
   const items = normalizeDraftItems(draft, "validation-listing", new Date().toISOString());
+  const isRequest = draft.postType === "request";
   return (
     draft.title.trim().length > 0 &&
     draft.description.trim().length > 0 &&
     draft.location.trim().length > 0 &&
     draft.category.trim().length > 0 &&
-    draft.images.length >= 1 &&
+    (isRequest || draft.images.length >= 1) &&
     draft.images.length <= 6 &&
     hasValidDraftItems(draft) &&
     items.length > 0
@@ -305,7 +306,9 @@ export function updateUserProfile(state: AppState, userId: string, draft: Profil
 
 export function createListing(state: AppState, sellerId: string, draft: ListingDraft): AppState {
   if (!isValidListingDraft(draft)) return state;
-  if (!hasCompleteSellerSetup(state, sellerId)) return state;
+  const owner = state.users.find((user) => user.id === sellerId);
+  if (!owner) return state;
+  if (owner.role === "seller" && !hasCompleteSellerSetup(state, sellerId)) return state;
 
   const now = new Date().toISOString();
   const listingId = createId("listing");
@@ -314,6 +317,7 @@ export function createListing(state: AppState, sellerId: string, draft: ListingD
     ...draft,
     id: listingId,
     sellerId,
+    postType: owner.role === "buyer" ? "request" : "offer",
     price: getListingTotalPrice(items),
     condition: getListingSummaryCondition(items),
     status: "available",
@@ -394,11 +398,14 @@ export function reserveListing(state: AppState, listingId: string, buyerId: stri
   if (!listing || listing.status !== "available" || listing.sellerId === buyerId) {
     return state;
   }
+  const isRequestPost = listing.postType === "request";
+  const reservationBuyerId = isRequestPost ? listing.sellerId : buyerId;
+  const reservationSellerId = isRequestPost ? buyerId : listing.sellerId;
 
   const existingReservation = state.reservations.find(
     (reservation) =>
       reservation.listingId === listingId &&
-      reservation.buyerId === buyerId &&
+      (isRequestPost ? reservation.sellerId === buyerId : reservation.buyerId === buyerId) &&
       ACTIVE_RESERVATION_STATUSES.includes(reservation.status)
   );
   if (existingReservation) return state;
@@ -407,8 +414,8 @@ export function reserveListing(state: AppState, listingId: string, buyerId: stri
   const reservation: Reservation = {
     id: createId("reservation"),
     listingId,
-    buyerId,
-    sellerId: listing.sellerId,
+    buyerId: reservationBuyerId,
+    sellerId: reservationSellerId,
     status: "requested",
     paymentDueAt: new Date(now.getTime() + DAY_MS).toISOString(),
     createdAt: now.toISOString(),
@@ -419,8 +426,10 @@ export function reserveListing(state: AppState, listingId: string, buyerId: stri
     id: createId("notification"),
     userId: listing.sellerId,
     type: "reservation_created",
-    title: "New buyer interest",
-    body: `${getUserName(state, buyerId)} is interested in ${listing.title}.`,
+    title: isRequestPost ? "New request response" : "New buyer interest",
+    body: isRequestPost
+      ? `${getUserName(state, buyerId)} replied to your request for ${listing.title}.`
+      : `${getUserName(state, buyerId)} is interested in ${listing.title}.`,
     entityId: reservation.id,
     createdAt: now.toISOString()
   };
@@ -692,6 +701,7 @@ function normalizeAppState(state: AppState): AppState {
 function normalizeListing(listing: Listing): Listing {
   return {
     ...listing,
+    postType: listing.postType ?? "offer",
     items: normalizeListingItems(listing)
   };
 }
@@ -722,6 +732,7 @@ function normalizeDraftItems(draft: ListingDraft, listingId: string, createdAt: 
   const draftListing: Listing = {
     id: listingId,
     sellerId: "",
+    postType: draft.postType ?? "offer",
     title: draft.title,
     description: draft.description,
     price: draft.price,
@@ -743,6 +754,7 @@ function draftItems(draft: ListingDraft): ListingItem[] {
 
 function hasValidDraftItems(draft: ListingDraft): boolean {
   const items = draftItems(draft);
+  const isRequest = draft.postType === "request";
 
   return (
     items.length > 0 &&
@@ -750,9 +762,8 @@ function hasValidDraftItems(draft: ListingDraft): boolean {
     items.every(
       (item) =>
         Boolean(item.name?.trim()) &&
-        Number.isFinite(item.price) &&
-        Number(item.price) > 0 &&
-        Boolean(item.condition && LISTING_CONDITIONS.has(item.condition))
+        (isRequest || (Number.isFinite(item.price) && Number(item.price) > 0)) &&
+        (isRequest || Boolean(item.condition && LISTING_CONDITIONS.has(item.condition)))
     )
   );
 }
