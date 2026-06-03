@@ -1727,11 +1727,18 @@ function BrowseView({
               <Filter size={16} />
               {filtersExpanded ? text.hideFilters : filterToggleLabel}
             </button>
+            {!filtersExpanded && activeFilterCount > 0 && (
+              <button type="button" className="ghost-inline compact-clear" onClick={() => setFilters(DEFAULT_BROWSE_FILTERS)}>
+                <X size={16} />
+                {text.clearFilters}
+              </button>
+            )}
           </div>
           <div
             id="browse-filter-controls"
             className={filtersExpanded ? "browse-filters expanded" : "browse-filters"}
             aria-label={text.browseFilters}
+            hidden={!filtersExpanded}
           >
             <Filter className="filter-icon" size={18} />
             <label>
