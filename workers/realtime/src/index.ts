@@ -1,4 +1,4 @@
-import { triageFeedbackSubmissions } from "./feedbackTriage";
+import { triageFeedbackSubmissions, type FeedbackTriageResult } from "./feedbackTriage";
 
 type BroadcastResponse = {
   ok: true;
@@ -9,7 +9,17 @@ type Env = {
   DB: D1Database;
   GITHUB_TOKEN?: string;
   GITHUB_REPO?: string;
+  MAINTENANCE_TOKEN?: string;
 };
+
+type MaintenanceResult = {
+  expiredReservations: number;
+  feedback: FeedbackTriageResult | null;
+  failures: string[];
+};
+
+const MAINTENANCE_PATH = "/internal/maintenance/run";
+const WORKER_HEADERS = { "x-resell-worker": "realtime-maintenance-v1" };
 
 export class ChatUserHub {
   private readonly sockets = new Set<WebSocket>();
@@ -69,22 +79,66 @@ export class ChatUserHub {
 }
 
 export default {
-  fetch() {
-    return new Response("Not found", { status: 404 });
+  async fetch(request: Request, env: Env) {
+    const url = new URL(request.url);
+    if (request.method === "POST" && url.pathname === MAINTENANCE_PATH) {
+      return runMaintenanceEndpoint(request, env);
+    }
+
+    return new Response("Not found", { status: 404, headers: WORKER_HEADERS });
   },
   async scheduled(_controller: ScheduledController, env: Env) {
     await runScheduledMaintenance(env);
   }
 };
 
-async function runScheduledMaintenance(env: Env) {
-  const tasks = [expireReservationHolds(env.DB), triageFeedbackSubmissions(env)];
-  const results = await Promise.allSettled(tasks);
-  for (const result of results) {
-    if (result.status === "rejected") {
-      console.error(result.reason);
-    }
+async function runMaintenanceEndpoint(request: Request, env: Env) {
+  if (!env.MAINTENANCE_TOKEN) {
+    return new Response("Maintenance is not configured", { status: 503, headers: WORKER_HEADERS });
   }
+  if (getBearerToken(request) !== env.MAINTENANCE_TOKEN) {
+    return new Response("Unauthorized", { status: 401, headers: WORKER_HEADERS });
+  }
+
+  const result = await runScheduledMaintenance(env);
+  return Response.json(
+    {
+      ok: result.failures.length === 0,
+      ...result
+    },
+    { status: result.failures.length ? 500 : 200, headers: WORKER_HEADERS }
+  );
+}
+
+async function runScheduledMaintenance(env: Env): Promise<MaintenanceResult> {
+  const [expiredReservations, feedback] = await Promise.allSettled([
+    expireReservationHolds(env.DB),
+    triageFeedbackSubmissions(env)
+  ]);
+
+  const result: MaintenanceResult = {
+    expiredReservations: 0,
+    feedback: null,
+    failures: []
+  };
+
+  if (expiredReservations.status === "fulfilled") {
+    result.expiredReservations = expiredReservations.value;
+  } else {
+    result.failures.push(toErrorMessage(expiredReservations.reason));
+  }
+
+  if (feedback.status === "fulfilled") {
+    result.feedback = feedback.value;
+  } else {
+    result.failures.push(toErrorMessage(feedback.reason));
+  }
+
+  if (result.failures.length) {
+    for (const failure of result.failures) console.error(failure);
+  }
+
+  return result;
 }
 
 async function expireReservationHolds(db: D1Database) {
@@ -102,6 +156,7 @@ async function expireReservationHolds(db: D1Database) {
     .bind(now)
     .all<{ id: string; buyer_id: string; seller_id: string; title: string; buyer_name: string }>();
 
+  let expiredCount = 0;
   for (const reservation of expiredHolds.results) {
     const updated = await db
       .prepare(
@@ -113,6 +168,7 @@ async function expireReservationHolds(db: D1Database) {
       .run();
 
     if (!updated.meta.changes) continue;
+    expiredCount += updated.meta.changes;
 
     await db.batch([
       db
@@ -145,8 +201,20 @@ async function expireReservationHolds(db: D1Database) {
         )
     ]);
   }
+
+  return expiredCount;
 }
 
 function createId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
+}
+
+function getBearerToken(request: Request) {
+  const header = request.headers.get("authorization") ?? "";
+  const [scheme, token] = header.split(/\s+/, 2);
+  return scheme?.toLowerCase() === "bearer" ? (token ?? "") : "";
+}
+
+function toErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }

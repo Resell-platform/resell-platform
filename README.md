@@ -93,10 +93,11 @@ npm run cf:d1:migrate:remote
 Configure Resend before deploying email login:
 
 ```bash
-npx wrangler pages secret put RESEND_API_KEY --project-name resell-platform
-npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
-npx wrangler pages secret put FEEDBACK_HASH_SALT --project-name resell-platform
-npx wrangler secret put GITHUB_TOKEN --config workers/realtime/wrangler.toml
+rtk proxy npx wrangler pages secret put RESEND_API_KEY --project-name resell-platform
+rtk proxy npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
+rtk proxy npx wrangler pages secret put FEEDBACK_HASH_SALT --project-name resell-platform
+rtk proxy npx wrangler secret put GITHUB_TOKEN --config workers/realtime/wrangler.toml
+rtk proxy npx wrangler secret put MAINTENANCE_TOKEN --config workers/realtime/wrangler.toml
 ```
 
 `AUTH_EMAIL_FROM` must be a sender address allowed by the Resend account, for example `Resell <login@your-verified-domain.com>`.
@@ -121,6 +122,7 @@ npm run deploy
 ## Operating Workflows
 
 - Feedback loop: users submit categorized feedback in the app, D1 stores it as the canonical inbox, and scheduled maintenance creates privacy-redacted GitHub issues for triage.
+- Feedback loop debugging lessons and verification commands live in [docs/feedback-loop-debugging-lessons.md](docs/feedback-loop-debugging-lessons.md).
 - Launch readiness: verify D1/R2, Resend email login, listing image upload, reservation chat, export, and realtime Worker deployment before opening buyer traffic.
 - Seller activation: guide users through profile completion, first listing, first buyer conversation, and completed handoff.
 - Buyer activation: guide users through browse/filter, contact seller, chat, and handoff planning.

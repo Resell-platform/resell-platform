@@ -62,7 +62,7 @@ describe("feedback triage worker", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await triageFeedbackSubmissions(
+    const result = await triageFeedbackSubmissions(
       {
         DB: db,
         GITHUB_TOKEN: "ghs_test",
@@ -71,6 +71,7 @@ describe("feedback triage worker", () => {
       new Date("2026-06-01T00:05:00.000Z")
     );
 
+    expect(result).toMatchObject({ selected: 1, claimed: 1, created: 1, failed: 0, claimMissed: 0 });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.github.com/repos/org/repo/issues",
       expect.objectContaining({
@@ -86,5 +87,53 @@ describe("feedback triage worker", () => {
 
     const issueUpdate = statements.find((statement) => statement.sql.includes("github_issue_number"));
     expect(issueUpdate?.args.slice(2, 4)).toEqual([47, "https://github.com/org/repo/issues/47"]);
+  });
+
+  it("reports missing GitHub config without querying D1", async () => {
+    const prepare = vi.fn();
+
+    const result = await triageFeedbackSubmissions({
+      DB: { prepare } as unknown as D1Database,
+      GITHUB_REPO: "org/repo"
+    });
+
+    expect(result).toMatchObject({
+      skipped: true,
+      missingConfig: ["GITHUB_TOKEN"],
+      selected: 0,
+      claimed: 0,
+      created: 0,
+      failed: 0,
+      claimMissed: 0
+    });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("stores GitHub response details when issue creation fails", async () => {
+    const { db, statements } = createDb();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ message: "Resource not accessible by personal access token" }), {
+          status: 403,
+          statusText: "Forbidden",
+          headers: { "x-github-request-id": "ABC:123" }
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await triageFeedbackSubmissions(
+      {
+        DB: db,
+        GITHUB_TOKEN: "ghs_test",
+        GITHUB_REPO: "org/repo"
+      },
+      new Date("2026-06-01T00:05:00.000Z")
+    );
+
+    expect(result).toMatchObject({ selected: 1, claimed: 1, created: 0, failed: 1, claimMissed: 0 });
+    const failureUpdate = statements.find((statement) => statement.sql.includes("github_error"));
+    expect(failureUpdate?.args[0]).toContain("GitHub issue creation failed with 403");
+    expect(failureUpdate?.args[0]).toContain("Resource not accessible by personal access token");
+    expect(failureUpdate?.args[0]).toContain("request_id=ABC:123");
   });
 });

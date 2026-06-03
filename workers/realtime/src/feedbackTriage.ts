@@ -27,13 +27,41 @@ type GitHubIssueResponse = {
   html_url: string;
 };
 
+export type FeedbackTriageResult = {
+  skipped: boolean;
+  missingConfig: string[];
+  selected: number;
+  claimed: number;
+  created: number;
+  failed: number;
+  claimMissed: number;
+};
+
+type FeedbackRowResult = {
+  claimed: boolean;
+  outcome: "created" | "failed" | "claim_missed";
+};
+
 const BATCH_SIZE = 10;
 const MAX_ERROR_LENGTH = 500;
 
-export async function triageFeedbackSubmissions(env: FeedbackTriageEnv, now = new Date()) {
-  if (!env.GITHUB_TOKEN || !env.GITHUB_REPO) {
-    console.warn("Skipping feedback triage; GITHUB_TOKEN or GITHUB_REPO is not configured.");
-    return;
+export async function triageFeedbackSubmissions(env: FeedbackTriageEnv, now = new Date()): Promise<FeedbackTriageResult> {
+  const missingConfig = [
+    env.GITHUB_TOKEN ? "" : "GITHUB_TOKEN",
+    env.GITHUB_REPO ? "" : "GITHUB_REPO"
+  ].filter(Boolean);
+
+  if (missingConfig.length) {
+    console.warn(`Skipping feedback triage; missing ${missingConfig.join(", ")}.`);
+    return {
+      skipped: true,
+      missingConfig,
+      selected: 0,
+      claimed: 0,
+      created: 0,
+      failed: 0,
+      claimMissed: 0
+    };
   }
 
   const rows = await env.DB.prepare(
@@ -47,12 +75,32 @@ export async function triageFeedbackSubmissions(env: FeedbackTriageEnv, now = ne
     .bind(BATCH_SIZE)
     .all<FeedbackRow>();
 
+  const result: FeedbackTriageResult = {
+    skipped: false,
+    missingConfig: [],
+    selected: rows.results.length,
+    claimed: 0,
+    created: 0,
+    failed: 0,
+    claimMissed: 0
+  };
+
   for (const row of rows.results) {
-    await triageFeedbackRow(env, row, now);
+    const rowResult = await triageFeedbackRow(env, row, now);
+    if (rowResult.claimed) result.claimed += 1;
+    if (rowResult.outcome === "created") result.created += 1;
+    if (rowResult.outcome === "failed") result.failed += 1;
+    if (rowResult.outcome === "claim_missed") result.claimMissed += 1;
   }
+
+  console.log(
+    `Feedback triage selected=${result.selected} claimed=${result.claimed} created=${result.created} failed=${result.failed} claimMissed=${result.claimMissed}`
+  );
+
+  return result;
 }
 
-async function triageFeedbackRow(env: FeedbackTriageEnv, row: FeedbackRow, now: Date) {
+async function triageFeedbackRow(env: FeedbackTriageEnv, row: FeedbackRow, now: Date): Promise<FeedbackRowResult> {
   const timestamp = now.toISOString();
   const claimed = await env.DB.prepare(
     `UPDATE feedback_submissions
@@ -63,7 +111,7 @@ async function triageFeedbackRow(env: FeedbackTriageEnv, row: FeedbackRow, now: 
   )
     .bind(timestamp, row.id)
     .run();
-  if (!claimed.meta.changes) return;
+  if (!claimed.meta.changes) return { claimed: false, outcome: "claim_missed" };
 
   const labels = classifyFeedback(row);
   const body = buildIssueBody(row);
@@ -88,6 +136,7 @@ async function triageFeedbackRow(env: FeedbackTriageEnv, row: FeedbackRow, now: 
     )
       .bind(row.summary, labels.join(","), issue.number, issue.html_url, timestamp, timestamp, row.id)
       .run();
+    return { claimed: true, outcome: "created" };
   } catch (error) {
     await env.DB.prepare(
       `UPDATE feedback_submissions
@@ -98,6 +147,7 @@ async function triageFeedbackRow(env: FeedbackTriageEnv, row: FeedbackRow, now: 
     )
       .bind(toBoundedError(error), timestamp, row.id)
       .run();
+    return { claimed: true, outcome: "failed" };
   }
 }
 
@@ -174,10 +224,23 @@ async function createGitHubIssue(
   });
 
   if (!response.ok) {
-    throw new Error(`GitHub issue creation failed with ${response.status}`);
+    throw new Error(await buildGitHubError(response));
   }
 
   return (await response.json()) as GitHubIssueResponse;
+}
+
+async function buildGitHubError(response: Response) {
+  const body = await response.text();
+  const requestId = response.headers.get("x-github-request-id");
+  return [
+    `GitHub issue creation failed with ${response.status}`,
+    response.statusText,
+    requestId ? `request_id=${requestId}` : "",
+    body.trim()
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function redact(value: string) {

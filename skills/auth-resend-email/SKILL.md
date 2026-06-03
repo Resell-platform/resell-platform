@@ -25,8 +25,8 @@ AUTH_EMAIL_FROM=Resell <login@loopvoro.com>
 Production secrets belong in Cloudflare Pages project secrets, not committed files:
 
 ```bash
-rtk npx wrangler pages secret put RESEND_API_KEY --project-name resell-platform
-rtk npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
+rtk proxy npx wrangler pages secret put RESEND_API_KEY --project-name resell-platform
+rtk proxy npx wrangler pages secret put AUTH_EMAIL_FROM --project-name resell-platform
 ```
 
 Local examples may live in `.dev.vars.example`; real local secrets may live in uncommitted local env files only.
@@ -50,4 +50,3 @@ rtk curl -sS -I https://loopvoro.com/
 ```
 
 Then test the login request path from the app. If using API calls directly, avoid exposing real codes or secrets in the transcript.
-
