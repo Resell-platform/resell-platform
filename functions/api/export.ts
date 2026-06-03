@@ -26,7 +26,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
             "Cloudflare R2",
             "Resend email login",
             "HttpOnly session cookies",
-            "Reservation and handoff workflow"
+            "Buyer interest and handoff workflow"
           ],
           businessModels: [
             "User / Profile",
@@ -51,7 +51,7 @@ export const onRequestGet: PagesFunction<Env> = async ({ env, request }) =>
             "Notification adapter",
             "Image upload adapter",
             "Deep link / open-in-app adapter",
-            "Reservation coordination adapter"
+            "Buyer interest coordination adapter"
           ]
         },
         user,

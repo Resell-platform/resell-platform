@@ -557,7 +557,7 @@ export function updateReservationStatus(
             userId: reservation.buyerId,
             type: "payment_paid" as const,
             title: "Handoff complete",
-            body: "The seller marked your reservation as complete.",
+            body: "The seller marked your handoff as complete.",
             entityId: reservationId,
             createdAt: now
           },
@@ -648,7 +648,7 @@ export function updateReservationHandoffPlan(
     userId: recipientId,
     type: "handoff_planned",
     title: "Handoff plan updated",
-    body: `${getUserName(state, actorId)} updated the ${mode} plan for ${listing?.title ?? "a reservation"}.`,
+    body: `${getUserName(state, actorId)} updated the ${mode} plan for ${listing?.title ?? "a buyer conversation"}.`,
     entityId: reservationId,
     createdAt: now
   });

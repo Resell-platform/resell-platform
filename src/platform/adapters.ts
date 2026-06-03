@@ -92,7 +92,7 @@ export function createReservationCoordinationAdapter(target: PlatformTarget): Re
   return {
     target,
     supportedReservationStatuses: ["requested", "awaiting_payment", "payment_sent", "paid", "overdue", "cancelled", "sold"],
-    coordinationNotice: "Use chat to coordinate pickup or handoff. Sellers can complete or cancel the reservation."
+    coordinationNotice: "Use chat to coordinate buyer interest, pickup, or handoff. Sellers can complete or cancel the handoff."
   };
 }
 

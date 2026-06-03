@@ -14,7 +14,7 @@ export const seedState: AppState = {
       pickupZip: "11201",
       serviceAreaMiles: 10,
       pickupPolicy: "Pickup in Brooklyn or nearby meetup by agreement.",
-      handoffPolicy: "Use reservation chat to confirm the handoff window before meeting.",
+      handoffPolicy: "Use chat to confirm the handoff window before meeting.",
       cancellationPolicy: "Please cancel early if timing changes so the listing can reopen.",
       offPlatformInstructions: "Agree on handoff details directly in chat.",
       responseExpectation: "Usually replies within one day.",

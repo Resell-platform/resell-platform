@@ -192,7 +192,7 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
         "Cloudflare R2",
         "Resend email login",
         "HttpOnly session cookies",
-        "Reservation and handoff workflow"
+        "Buyer interest and handoff workflow"
       ],
       businessModels: [
         "User / Profile",
@@ -217,7 +217,7 @@ function createLocalExport(state: AppState, activeUser?: User | null): ExportArc
         "Notification adapter",
         "Image upload adapter",
         "Deep link / open-in-app adapter",
-        "Reservation coordination adapter"
+        "Buyer interest coordination adapter"
       ]
     },
     user,

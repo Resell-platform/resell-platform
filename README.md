@@ -1,6 +1,6 @@
 # Resell Platform
 
-MVP marketplace for seller listings with one or more included items, buyer reservations, seller-buyer chat, image uploads, pickup or handoff coordination, hold expiration, completion, and cancellation.
+MVP marketplace for seller listings with one or more included items, buyer interest, seller-buyer chat, image uploads, pickup or handoff coordination, follow-up reminders, completion, and cancellation.
 
 ## Local Development
 
@@ -37,13 +37,13 @@ npm run build
 ## Current MVP
 
 - Seller can publish listings with 1-6 uploaded images and one or more item rows after completing seller setup.
-- Buyers can browse listings with structured filters, reserve an available listing, and open a reservation-scoped chat with the seller.
-- Reservations support cancellation reasons and a lightweight handoff plan for pickup or shipping coordination.
+- Buyers can browse listings with structured filters, contact a seller about an available listing, and open a listing-scoped buyer conversation.
+- Buyer conversations support cancellation reasons and a lightweight handoff plan for pickup or shipping coordination.
 - Cloudflare mode supports email-code account login, HttpOnly session cookies, editable profiles, and email/phone trust badge fields.
 - The H5/PWA web app supports English and Mandarin UI chrome for core marketplace workflows.
-- The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and reservation coordination.
-- Logged-in users can export their account, seller listings, listing items, reservations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
-- Reservation holds expire 24 hours after reservation. `/api/state` and the scheduled realtime Worker create idempotent buyer/seller hold-expiration notifications.
+- The H5/PWA web app now uses typed platform adapters for login, share, browser notifications, image upload, deep links, and buyer-interest coordination.
+- Logged-in users can export their account, seller listings, listing items, buyer conversations, chat messages, notifications, trust badges, and moderation model metadata as JSON.
+- Buyer conversations get 24-hour follow-up reminders. `/api/state` and the scheduled realtime Worker create idempotent buyer/seller follow-up notifications.
 - Users can send structured feedback from the web app. Cloudflare mode stores feedback in D1, and scheduled Worker maintenance can convert submitted feedback into GitHub issues.
 - Plain local demo users can be switched from the left navigation on desktop. Cloudflare mode uses account login instead.
 
@@ -113,8 +113,8 @@ npm run deploy
 - Pages Functions expose email-code auth, `/api/me`, `/api/state`, `/api/listings`, `/api/reservations`, `/api/messages`, `/api/realtime`, reservation status updates, and notification read actions.
 - Pages Functions expose `/api/export` for authenticated JSON export across the unified business models.
 - Protected mutations derive the actor from the HttpOnly session cookie instead of trusting browser-submitted user IDs.
-- Reservation creation updates listing availability in D1 with a conditional update, so a second buyer cannot reserve the same available item.
-- Chat writes messages to D1 after checking the sender is the reservation buyer or seller, then broadcasts a realtime event through the per-user `ChatUserHub` Durable Object so connected tabs refresh immediately.
+- Buyer interest creation leaves listing availability open so multiple buyers can contact a seller about the same listing.
+- Chat writes messages to D1 after checking the sender is the conversation buyer or seller, then broadcasts a realtime event through the per-user `ChatUserHub` Durable Object so connected tabs refresh immediately.
 - When the `LISTING_IMAGES` R2 binding is configured, new listing uploads store image bytes in R2 and D1 stores the served image path plus R2 key.
 - Until R2 is enabled, the Functions fallback stores uploaded image data URLs in D1 so the platform can still run with a real shared database.
 
@@ -129,7 +129,7 @@ npm run deploy
 
 ## Product Architecture
 
-- Backend layer: Cloudflare Pages Functions / Workers, D1, R2, Resend email login, HttpOnly sessions, and reservation handoff workflow.
+- Backend layer: Cloudflare Pages Functions / Workers, D1, R2, Resend email login, HttpOnly sessions, and buyer-interest handoff workflow.
 - Business model layer: User/Profile, Listing, ListingImage, Reservation, ChatMessage, Notification, TrustBadge, and ModerationStatus.
 - Frontend layer: current H5/PWA web app first; WeChat mini program, Xiaohongshu mini program, and Messenger WebView later.
-- Platform adapter layer: `src/platform/adapters.ts` defines login, share, notification, image upload, deep link/open-in-app, and reservation coordination adapters. The current implementation targets H5/PWA; WeChat, Xiaohongshu, and Messenger can add platform-specific implementations against the same contracts.
+- Platform adapter layer: `src/platform/adapters.ts` defines login, share, notification, image upload, deep link/open-in-app, and buyer-interest coordination adapters. The current implementation targets H5/PWA; WeChat, Xiaohongshu, and Messenger can add platform-specific implementations against the same contracts.
