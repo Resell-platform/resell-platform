@@ -20,13 +20,14 @@ Use this workflow for the periodic feedback triage loop. The website stores feed
 Pages Functions:
 
 ```bash
-rtk npx wrangler pages secret put FEEDBACK_HASH_SALT --project-name resell-platform
+rtk proxy npx wrangler pages secret put FEEDBACK_HASH_SALT --project-name resell-platform
 ```
 
 Scheduled Worker:
 
 ```bash
-rtk npx wrangler secret put GITHUB_TOKEN --config workers/realtime/wrangler.toml
+rtk proxy npx wrangler secret put GITHUB_TOKEN --config workers/realtime/wrangler.toml
+rtk proxy npx wrangler secret put MAINTENANCE_TOKEN --config workers/realtime/wrangler.toml
 ```
 
 `workers/realtime/wrangler.toml` sets `GITHUB_REPO`.
