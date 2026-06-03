@@ -9,23 +9,9 @@ type FakeStatement = {
   run: () => Promise<{ meta: { changes: number } }>;
 };
 
-function createDb() {
+function createDb(overrides: Partial<typeof baseRow> = {}) {
   const statements: FakeStatement[] = [];
-  const row = {
-    id: "feedback-1",
-    user_id: "user-1",
-    category: "bug",
-    severity: "blocking",
-    summary: "Chat composer freezes",
-    details: "The chat composer freezes after I paste a phone number 555-123-4567.",
-    source_view: "chat",
-    entity_type: "reservation",
-    entity_id: "reservation-1",
-    page_url: "https://loopvoro.com/?token=secret",
-    locale: "en",
-    data_source: "cloudflare",
-    created_at: "2026-06-01T00:00:00.000Z"
-  };
+  const row = { ...baseRow, ...overrides };
   const db = {
     prepare(sql: string) {
       const statement: FakeStatement = {
@@ -49,6 +35,22 @@ function createDb() {
   };
   return { db: db as unknown as D1Database, statements };
 }
+
+const baseRow = {
+    id: "feedback-1",
+    user_id: "user-1",
+    category: "bug",
+    severity: "blocking",
+    summary: "Chat composer freezes",
+    details: "The chat composer freezes after I paste a phone number 555-123-4567.",
+    source_view: "chat",
+    entity_type: "reservation",
+    entity_id: "reservation-1",
+    page_url: "https://loopvoro.com/?token=secret",
+    locale: "en",
+    data_source: "cloudflare",
+    created_at: "2026-06-01T00:00:00.000Z"
+};
 
 describe("feedback triage worker", () => {
   afterEach(() => {
@@ -87,6 +89,27 @@ describe("feedback triage worker", () => {
 
     const issueUpdate = statements.find((statement) => statement.sql.includes("github_issue_number"));
     expect(issueUpdate?.args.slice(2, 4)).toEqual([47, "https://github.com/org/repo/issues/47"]);
+  });
+
+  it("keeps ISO dates in issue titles while redacting phone numbers", async () => {
+    const { db } = createDb({
+      summary: "Smoke verification 2026-06-03T03:30Z call 555-123-4567"
+    });
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ number: 47, html_url: "https://github.com/org/repo/issues/47" }))
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await triageFeedbackSubmissions({
+      DB: db,
+      GITHUB_TOKEN: "ghs_test",
+      GITHUB_REPO: "org/repo"
+    });
+
+    const firstFetchCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    const issueBody = JSON.parse(String(firstFetchCall[1].body)) as { title: string };
+    expect(issueBody.title).toContain("2026-06-03T03:30Z");
+    expect(issueBody.title).toContain("[redacted phone]");
   });
 
   it("reports missing GitHub config without querying D1", async () => {

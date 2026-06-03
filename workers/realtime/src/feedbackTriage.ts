@@ -246,8 +246,12 @@ async function buildGitHubError(response: Response) {
 function redact(value: string) {
   return value
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted email]")
-    .replace(/\+?\d[\d\s().-]{7,}\d/g, "[redacted phone]")
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, (match) => (isIsoDate(match) ? match : "[redacted phone]"))
     .replace(/\b(?:token|secret|password|cookie|authorization)=\S+/gi, "[redacted secret]");
+}
+
+function isIsoDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 
 function toBoundedError(error: unknown) {
