@@ -284,11 +284,11 @@ describe("App user flows", () => {
     expect(screen.getByLabelText(/item name 2/i)).toBeInTheDocument();
   });
 
-  it("saves a structured handoff plan from a reservation", () => {
+  it("saves a structured handoff plan from buyer interest", () => {
     const { container } = render(<App />);
 
     fireEvent.change(screen.getAllByLabelText(/demo user/i)[0], { target: { value: "buyer-1" } });
-    fireEvent.click(screen.getByRole("button", { name: /reservations/i }));
+    fireEvent.click(screen.getByRole("button", { name: /interest/i }));
     fireEvent.change(screen.getByLabelText(/window/i), { target: { value: "Saturday 2-4 PM" } });
     fireEvent.change(screen.getByLabelText(/location/i), { target: { value: "Lobby entrance" } });
     fireEvent.change(screen.getByLabelText(/note/i), { target: { value: "Text when nearby." } });
@@ -300,11 +300,11 @@ describe("App user flows", () => {
     expect(screen.getByText(/handoff planned/i)).toBeInTheDocument();
   });
 
-  it("requires a cancellation reason before cancelling a buyer reservation", () => {
+  it("requires a cancellation reason before cancelling buyer interest", () => {
     const { container } = render(<App />);
 
     fireEvent.change(screen.getAllByLabelText(/demo user/i)[0], { target: { value: "buyer-1" } });
-    fireEvent.click(screen.getByRole("button", { name: /reservations/i }));
+    fireEvent.click(screen.getByRole("button", { name: /interest/i }));
     fireEvent.click(screen.getByRole("button", { name: /cancel conversation/i }));
     expect(screen.getByRole("button", { name: /confirm cancellation/i })).toBeDisabled();
 
@@ -357,7 +357,7 @@ describe("App user flows", () => {
 
     const navigation = screen.getByLabelText(/primary navigation/i);
 
-    for (const label of ["Browse", "Post", "Handoffs", "Chat"]) {
+    for (const label of ["Browse", "Post", "Interest", "Chat"]) {
       expect(within(navigation).getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
     }
     expect(within(navigation).queryByRole("button", { name: /alerts/i })).not.toBeInTheDocument();
@@ -554,7 +554,7 @@ describe("App user flows", () => {
     expect(refreshedCameraRow).not.toBeNull();
     fireEvent.click(within(refreshedCameraRow as HTMLElement).getByRole("button", { name: /open handoff/i }));
 
-    expect(screen.getByRole("heading", { name: /handoffs and buyer conversations/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /buyer interest and handoffs/i })).toBeInTheDocument();
     expect(screen.getByText(/buyer jordan lee/i)).toBeInTheDocument();
     expect(document.querySelector(".active-order")).toHaveTextContent("Mirrorless camera kit");
   });
@@ -748,7 +748,7 @@ describe("App user flows", () => {
 
     fireEvent.click(within(cameraRow as HTMLElement).getByRole("button", { name: /open handoff/i }));
 
-    expect(screen.getByRole("heading", { name: /handoffs and buyer conversations/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /buyer interest and handoffs/i })).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledTimes(2);
 
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));

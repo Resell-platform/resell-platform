@@ -371,7 +371,7 @@ describe("Cloudflare reservation workflow", () => {
     ).rejects.toThrow("Only the seller can complete the handoff.");
     await expect(
       updateReservationStatusInDb(paymentAttempt.env.DB, "reservation-1", "buyer-1", "payment_sent")
-    ).rejects.toThrow("Reservation status can only be completed or cancelled.");
+    ).rejects.toThrow("Buyer conversation status can only be completed or cancelled.");
 
     const completedBatchCalls = completed.batch.mock.calls as unknown as [FakeStatement[]][];
     const statements = completedBatchCalls[0]?.[0] ?? [];
@@ -382,7 +382,7 @@ describe("Cloudflare reservation workflow", () => {
     if (!reservationUpdate || !notificationInsert) return;
     expect(reservationUpdate.args[0]).toBe("sold");
     expect(notificationInsert.sql).toContain("Handoff complete");
-    expect(notificationInsert.args[2]).toBe("The seller marked your reservation as complete.");
+    expect(notificationInsert.args[2]).toBe("The seller marked your handoff as complete.");
   });
 
   it("records cancellation reasons without changing listing availability", async () => {

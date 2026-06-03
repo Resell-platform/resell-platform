@@ -638,10 +638,10 @@ export async function updateReservationStatusInDb(
   const status = typeof update === "string" ? update : update.status;
   const reservation = await getReservationForParticipant(db, reservationId, actorId);
   if (TERMINAL_RESERVATION_STATUSES.has(reservation.status)) {
-    throw new ApiError("Terminal reservations cannot be changed.", 409);
+    throw new ApiError("Completed or cancelled buyer conversations cannot be changed.", 409);
   }
   if (status !== "sold" && status !== "cancelled") {
-    throw new ApiError("Reservation status can only be completed or cancelled.", 400);
+    throw new ApiError("Buyer conversation status can only be completed or cancelled.", 400);
   }
   if (status === "sold" && actorId !== reservation.seller_id) {
     throw new ApiError("Only the seller can complete the handoff.", 403);
@@ -670,7 +670,7 @@ export async function updateReservationStatusInDb(
         .bind(
           createId("notification"),
           reservation.buyer_id,
-          "The seller marked your reservation as complete.",
+          "The seller marked your handoff as complete.",
           reservationId,
           now
         )
@@ -731,7 +731,7 @@ export async function updateReservationHandoffInDb(
 ) {
   const reservation = await getReservationForParticipant(db, reservationId, actorId);
   if (TERMINAL_RESERVATION_STATUSES.has(reservation.status)) {
-    throw new ApiError("Terminal reservations cannot be changed.", 409);
+    throw new ApiError("Completed or cancelled buyer conversations cannot be changed.", 409);
   }
   const method = normalizeHandoffMethod(draft.handoffMethod);
   const now = new Date().toISOString();
@@ -864,7 +864,7 @@ async function getReservationForParticipant(db: D1Database, reservationId: strin
     .prepare("SELECT * FROM reservations WHERE id = ? AND (buyer_id = ? OR seller_id = ?)")
     .bind(reservationId, userId, userId)
     .first<ReservationRow>();
-  if (!reservation) throw new ApiError("Reservation not found for this user.", 404);
+  if (!reservation) throw new ApiError("Buyer conversation not found for this user.", 404);
   return reservation;
 }
 

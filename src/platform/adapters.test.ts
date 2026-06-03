@@ -14,7 +14,7 @@ describe("platform adapters", () => {
   it("exposes reservation coordination statuses", () => {
     const adapter = createReservationCoordinationAdapter("h5-pwa");
 
-    expect(adapter.coordinationNotice).toContain("coordinate pickup or handoff");
+    expect(adapter.coordinationNotice).toContain("coordinate buyer interest");
     expect(adapter.supportedReservationStatuses).toContain("requested");
     expect(adapter.supportedReservationStatuses).toContain("sold");
     expect(adapter.supportedReservationStatuses).toContain("cancelled");
