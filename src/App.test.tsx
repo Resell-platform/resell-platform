@@ -211,6 +211,7 @@ describe("App user flows", () => {
   it("filters and sorts browse listings on the client", () => {
     const { container } = render(<App />);
 
+    fireEvent.click(screen.getByRole("button", { name: /^filters$/i }));
     fireEvent.change(screen.getByLabelText(/category/i), { target: { value: "Electronics" } });
 
     expect(screen.getAllByText("Mirrorless camera kit")).not.toHaveLength(0);
@@ -241,18 +242,23 @@ describe("App user flows", () => {
     const toggle = screen.getByRole("button", { name: /^filters$/i });
     const controls = container.querySelector("#browse-filter-controls");
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(controls).toHaveAttribute("hidden");
     expect(controls).not.toHaveClass("expanded");
 
-    fireEvent.change(screen.getByLabelText(/category/i), { target: { value: "Electronics" } });
-    expect(screen.getByRole("button", { name: /filters \(1 active\)/i })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /filters \(1 active\)/i }));
+    fireEvent.click(toggle);
     expect(screen.getByRole("button", { name: /hide filters/i })).toHaveAttribute("aria-expanded", "true");
+    expect(controls).not.toHaveAttribute("hidden");
     expect(controls).toHaveClass("expanded");
+    fireEvent.change(screen.getByLabelText(/category/i), { target: { value: "Electronics" } });
 
     fireEvent.click(screen.getByRole("button", { name: /hide filters/i }));
     expect(screen.getByRole("button", { name: /filters \(1 active\)/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /clear filters/i })).toBeInTheDocument();
+    expect(controls).toHaveAttribute("hidden");
     expect(controls).not.toHaveClass("expanded");
+
+    fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+    expect(screen.getByRole("button", { name: /^filters$/i })).toBeInTheDocument();
   });
 
   it("lets narrow screen users explicitly collapse completed seller item rows", () => {
