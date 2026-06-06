@@ -3,6 +3,7 @@ import {
   createListingInDb,
   readState,
   reserveListingInDb,
+  updateListingInDb,
   updateReservationHandoffInDb,
   updateReservationStatusInDb,
   type Env
@@ -113,6 +114,88 @@ function createReservationRow(status = "requested") {
 }
 
 describe("Cloudflare listing persistence", () => {
+  it("hydrates listing images as cacheable API URLs instead of inline data", async () => {
+    const { env, statements } = createEnv({
+      all(statement) {
+        if (statement.sql.includes("FROM users")) {
+          return [
+            {
+              id: "seller-1",
+              name: "Avery Chen",
+              role: "seller",
+              email_notifications_enabled: 1
+            }
+          ];
+        }
+        if (statement.sql.includes("FROM listings")) {
+          return [
+            {
+              id: "listing-1",
+              seller_id: "seller-1",
+              post_type: "offer",
+              title: "Walnut writing desk",
+              description: "Compact desk.",
+              price: 180,
+              category: "Furniture",
+              condition: "good",
+              location: "Brooklyn pickup",
+              status: "available",
+              created_at: "2026-05-23T10:00:00.000Z",
+              updated_at: "2026-05-23T10:00:00.000Z"
+            }
+          ];
+        }
+        if (statement.sql.includes("FROM listing_images")) {
+          return [
+            {
+              id: "image-legacy",
+              listing_id: "listing-1",
+              name: "desk.png",
+              r2_key: null,
+              is_primary: 1,
+              created_at: "2026-05-23T10:00:00.000Z"
+            },
+            {
+              id: "image-r2",
+              listing_id: "listing-1",
+              name: "desk-detail.png",
+              r2_key: "listing-1-image-r2-desk-detail.png",
+              is_primary: 0,
+              created_at: "2026-05-23T10:01:00.000Z"
+            }
+          ];
+        }
+        if (statement.sql.includes("FROM listing_items")) {
+          return [
+            {
+              id: "item-1",
+              listing_id: "listing-1",
+              name: "Desk",
+              price: 180,
+              condition: "good",
+              position: 0,
+              created_at: "2026-05-23T10:00:00.000Z"
+            }
+          ];
+        }
+        return [];
+      }
+    });
+
+    const state = await readState(env.DB);
+
+    expect(state.listings[0].images.map((image) => image.dataUrl)).toEqual([
+      "/api/listing-images/image-legacy",
+      "/api/images/listing-1-image-r2-desk-detail.png"
+    ]);
+    expect(statements.find((statement) => statement.sql.includes("FROM reservations r"))).toBeUndefined();
+    expect(
+      statements
+        .find((statement) => statement.sql.includes("FROM listing_images"))
+        ?.sql.toLowerCase()
+    ).not.toContain("data_url");
+  });
+
   it("persists every item in a multi-item listing", async () => {
     const { env, statements, batch } = createEnv();
 
@@ -290,6 +373,73 @@ describe("Cloudflare listing persistence", () => {
     );
 
     expect(simplified.batch).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves existing legacy image rows when editing a listing returned with image API URLs", async () => {
+    const legacyImageDataUrl = "data:image/png;base64,bGVnYWN5";
+    const { env, statements, batch } = createEnv({
+      first(statement) {
+        if (statement.sql.includes("FROM listings")) {
+          return {
+            id: "listing-1",
+            seller_id: "seller-1",
+            post_type: "offer",
+            title: "Kitchen bundle",
+            description: "Small apartment kitchen starter set.",
+            price: 95,
+            category: "Home",
+            condition: "good",
+            location: "Local pickup",
+            status: "available",
+            created_at: "2026-05-23T10:00:00.000Z",
+            updated_at: "2026-05-23T10:00:00.000Z"
+          };
+        }
+        return undefined;
+      },
+      all(statement) {
+        if (statement.sql.includes("FROM listing_images")) {
+          return [
+            {
+              id: "image-1",
+              data_url: legacyImageDataUrl,
+              r2_key: null
+            }
+          ];
+        }
+        return [];
+      }
+    });
+
+    await updateListingInDb(env, "listing-1", "seller-1", {
+      ...createDraft([
+        {
+          id: "item-1",
+          name: "Saucepan",
+          price: 35,
+          condition: "good",
+          notes: "Stainless steel",
+          position: 0,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]),
+      images: [
+        {
+          id: "image-1",
+          name: "kitchen.png",
+          dataUrl: "/api/listing-images/image-1",
+          primary: true,
+          createdAt: "2026-05-23T10:00:00.000Z"
+        }
+      ]
+    });
+
+    const batchCalls = batch.mock.calls as unknown as [FakeStatement[]][];
+    const insertImage = batchCalls[0]?.[0].find((statement) => statement.sql.includes("INSERT INTO listing_images"));
+    expect(insertImage?.args.slice(0, 5)).toEqual(["image-1", "listing-1", "kitchen.png", legacyImageDataUrl, null]);
+    expect(statements.find((statement) => statement.sql.includes("SELECT id, data_url, r2_key"))?.args).toEqual([
+      "listing-1"
+    ]);
   });
 });
 
