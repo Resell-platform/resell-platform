@@ -93,6 +93,13 @@ type BrowseFilters = {
   maxPrice: string;
   sort: BrowseSort;
 };
+type BrowseListingViewModel = {
+  listing: Listing;
+  displayItems: ListingItem[];
+  itemSummary: ListingItem[];
+  searchFields: string[];
+  updatedAtMs: number;
+};
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 const ACTIVE_RESERVATION_STATUSES: Reservation["status"][] = [
   "requested",
@@ -346,15 +353,30 @@ function getDraftItemTotal(draft: ListingDraft) {
   );
 }
 
-function getListingItemSummary(listing: Listing) {
-  return listing.items
-    .slice()
-    .sort((first, second) => first.position - second.position)
-    .slice(0, 3);
-}
-
 function getListingDisplayItems(listing: Listing) {
   return listing.items.slice().sort((first, second) => first.position - second.position);
+}
+
+function getListingSearchFields(listing: Listing) {
+  return [
+    listing.title,
+    listing.category,
+    listing.description,
+    listing.location,
+    ...listing.items.flatMap((item) => [item.name, item.notes ?? ""])
+  ].map((field) => field.toLowerCase());
+}
+
+function createBrowseListingViewModel(listing: Listing): BrowseListingViewModel {
+  const displayItems = getListingDisplayItems(listing);
+
+  return {
+    listing,
+    displayItems,
+    itemSummary: displayItems.slice(0, 3),
+    searchFields: getListingSearchFields(listing),
+    updatedAtMs: new Date(listing.updatedAt).getTime()
+  };
 }
 
 function getActiveBrowseFilterCount(filters: BrowseFilters) {
@@ -669,58 +691,76 @@ export default function App() {
     };
   }, [dataSource, sessionUser?.id, text.cloudflareRequestFailed]);
 
-  const activeUser =
-    dataSource === "cloudflare"
-      ? sessionUser
-      : state.users.find((user) => user.id === state.activeUserId) ?? state.users[0];
+  const activeUser = useMemo(
+    () =>
+      dataSource === "cloudflare"
+        ? sessionUser
+        : state.users.find((user) => user.id === state.activeUserId) ?? state.users[0],
+    [dataSource, sessionUser, state.activeUserId, state.users]
+  );
+  const browseListingIndex = useMemo(
+    () => state.listings.map((listing) => createBrowseListingViewModel(listing)),
+    [state.listings]
+  );
   const listingCategories = useMemo(
     () => Array.from(new Set(state.listings.map((listing) => listing.category))).sort(),
     [state.listings]
   );
-  const visibleListings = useMemo(() => {
+  const visibleBrowseListings = useMemo(() => {
     const normalized = query.toLowerCase().trim();
     const minPrice = Number.parseFloat(browseFilters.minPrice);
     const maxPrice = Number.parseFloat(browseFilters.maxPrice);
-    return state.listings
-      .filter((listing) => {
+    return browseListingIndex
+      .filter(({ listing, searchFields }) => {
         if (browseFilters.category !== "all" && listing.category !== browseFilters.category) return false;
         if (browseFilters.condition !== "all" && listing.condition !== browseFilters.condition) return false;
         if (browseFilters.status !== "all" && listing.status !== browseFilters.status) return false;
         if (!Number.isNaN(minPrice) && listing.price < minPrice) return false;
         if (!Number.isNaN(maxPrice) && listing.price > maxPrice) return false;
         if (!normalized) return true;
-        return [
-          listing.title,
-          listing.category,
-          listing.description,
-          listing.location,
-          ...listing.items.flatMap((item) => [item.name, item.notes ?? ""])
-        ].some((field) => field.toLowerCase().includes(normalized));
+        return searchFields.some((field) => field.includes(normalized));
       })
       .sort((first, second) => {
-        if (browseFilters.sort === "price_asc") return first.price - second.price;
-        if (browseFilters.sort === "price_desc") return second.price - first.price;
-        if (browseFilters.sort === "title") return first.title.localeCompare(second.title);
-        return new Date(second.updatedAt).getTime() - new Date(first.updatedAt).getTime();
+        if (browseFilters.sort === "price_asc") return first.listing.price - second.listing.price;
+        if (browseFilters.sort === "price_desc") return second.listing.price - first.listing.price;
+        if (browseFilters.sort === "title") return first.listing.title.localeCompare(second.listing.title);
+        return second.updatedAtMs - first.updatedAtMs;
       });
-  }, [browseFilters, query, state.listings]);
-  const selectedListing =
-    visibleListings.find((listing) => listing.id === selectedListingId) ??
-    visibleListings[0] ??
-    null;
-  const userReservations = activeUser
-    ? state.reservations.filter(
-        (reservation) => reservation.sellerId === activeUser.id || reservation.buyerId === activeUser.id
-      )
-    : [];
-  const selectedReservation =
-    userReservations.find((reservation) => reservation.id === selectedReservationId) ??
-    userReservations[0];
-  const unreadCount = state.notifications.filter(
-    (notification) => activeUser && notification.userId === activeUser.id && !notification.readAt
-  ).length;
-  const cancellationReservation =
-    userReservations.find((reservation) => reservation.id === cancellationRequestId) ?? null;
+  }, [browseFilters, browseListingIndex, query]);
+  const selectedBrowseListing = useMemo(
+    () =>
+      visibleBrowseListings.find(({ listing }) => listing.id === selectedListingId) ??
+      visibleBrowseListings[0] ??
+      null,
+    [selectedListingId, visibleBrowseListings]
+  );
+  const selectedListing = selectedBrowseListing?.listing ?? null;
+  const userReservations = useMemo(
+    () =>
+      activeUser
+        ? state.reservations.filter(
+            (reservation) => reservation.sellerId === activeUser.id || reservation.buyerId === activeUser.id
+          )
+        : [],
+    [activeUser?.id, state.reservations]
+  );
+  const selectedReservation = useMemo(
+    () =>
+      userReservations.find((reservation) => reservation.id === selectedReservationId) ??
+      userReservations[0],
+    [selectedReservationId, userReservations]
+  );
+  const unreadCount = useMemo(
+    () =>
+      state.notifications.filter(
+        (notification) => activeUser && notification.userId === activeUser.id && !notification.readAt
+      ).length,
+    [activeUser?.id, state.notifications]
+  );
+  const cancellationReservation = useMemo(
+    () => userReservations.find((reservation) => reservation.id === cancellationRequestId) ?? null,
+    [cancellationRequestId, userReservations]
+  );
   const feedbackSourceLabel: Record<View, string> = {
     browse: text.browseFeedbackSource,
     sell: text.sellFeedbackSource,
@@ -1258,8 +1298,8 @@ export default function App() {
         {authMessage && (dataSource === "local" || isNarrowLayout) && <p className="global-message">{authMessage}</p>}
         {view === "browse" && (
           <BrowseView
-            listings={visibleListings}
-            selectedListing={selectedListing}
+            listings={visibleBrowseListings}
+            selectedListing={selectedBrowseListing}
             activeUserId={activeUser?.id ?? ""}
             query={query}
             setQuery={setQuery}
@@ -1663,8 +1703,8 @@ function BrowseView({
   text,
   locale
 }: {
-  listings: Listing[];
-  selectedListing: Listing | null;
+  listings: BrowseListingViewModel[];
+  selectedListing: BrowseListingViewModel | null;
   activeUserId: string;
   query: string;
   setQuery: (query: string) => void;
@@ -1681,12 +1721,14 @@ function BrowseView({
   const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
   const isNarrowLayout = useNarrowLayout();
   const activeFilterCount = getActiveBrowseFilterCount(filters);
+  const selectedListingRecord = selectedListing?.listing ?? null;
+  const selectedDisplayItems = selectedListing?.displayItems ?? [];
   const filterToggleLabel =
     activeFilterCount > 0
       ? `${text.showFilters} (${activeFilterCount} ${text.activeFilters})`
       : text.showFilters;
   const showFeed = !isNarrowLayout || !mobileDetailOpen;
-  const showDetail = Boolean(selectedListing) && (!isNarrowLayout || mobileDetailOpen);
+  const showDetail = Boolean(selectedListingRecord) && (!isNarrowLayout || mobileDetailOpen);
 
   useEffect(() => {
     if (!isNarrowLayout) {
@@ -1819,12 +1861,11 @@ function BrowseView({
           </div>
           <div className="listing-grid">
             {listings.length === 0 && <p className="empty-state">{text.noFilteredListings}</p>}
-            {listings.map((listing) => {
-              const itemSummary = getListingItemSummary(listing);
+            {listings.map(({ listing, itemSummary }) => {
               return (
                 <button
                   key={listing.id}
-                  className={selectedListing?.id === listing.id ? "listing-card selected" : "listing-card"}
+                  className={selectedListingRecord?.id === listing.id ? "listing-card selected" : "listing-card"}
                   onClick={() => {
                     selectListing(listing.id);
                     if (isNarrowLayout) {
@@ -1858,7 +1899,7 @@ function BrowseView({
         </div>
       )}
 
-      {showDetail && selectedListing && (
+      {showDetail && selectedListingRecord && (
         <article className="panel detail">
           {isNarrowLayout && (
             <button type="button" className="secondary mobile-detail-back" onClick={() => setMobileDetailOpen(false)}>
@@ -1866,49 +1907,44 @@ function BrowseView({
               {text.backToListings}
             </button>
           )}
-          <ListingGallery listing={selectedListing} />
+          <ListingGallery listing={selectedListingRecord} />
           <div className="detail-copy">
-            <span className={`badge ${selectedListing.status}`}>{statusLabel(selectedListing.status, locale)}</span>
-            <span className={isRequestPost(selectedListing) ? "post-type-badge request" : "post-type-badge offer"}>
-              {isRequestPost(selectedListing) ? text.requestPost : text.offerPost}
+            <span className={`badge ${selectedListingRecord.status}`}>{statusLabel(selectedListingRecord.status, locale)}</span>
+            <span className={isRequestPost(selectedListingRecord) ? "post-type-badge request" : "post-type-badge offer"}>
+              {isRequestPost(selectedListingRecord) ? text.requestPost : text.offerPost}
             </span>
-            <h2>{selectedListing.title}</h2>
-            <p className="price">{getListingPriceText(selectedListing, text)}</p>
-            <p>{selectedListing.description}</p>
-            {(() => {
-              const displayItems = getListingDisplayItems(selectedListing);
-              if (displayItems.length === 0) return null;
-
-              return (
-                <ListingDetailItems listing={selectedListing} items={displayItems} text={text} locale={locale} />
-              );
-            })()}
+            <h2>{selectedListingRecord.title}</h2>
+            <p className="price">{getListingPriceText(selectedListingRecord, text)}</p>
+            <p>{selectedListingRecord.description}</p>
+            {selectedDisplayItems.length > 0 && (
+              <ListingDetailItems listing={selectedListingRecord} items={selectedDisplayItems} text={text} locale={locale} />
+            )}
             <dl>
               <div>
                 <dt>{text.category}</dt>
-                <dd>{categoryLabel(selectedListing.category, locale)}</dd>
+                <dd>{categoryLabel(selectedListingRecord.category, locale)}</dd>
               </div>
               <div>
                 <dt>{text.location}</dt>
-                <dd>{selectedListing.location}</dd>
+                <dd>{selectedListingRecord.location}</dd>
               </div>
             </dl>
             <button
               className="primary sticky-cta"
               disabled={
-                (selectedListing.status !== "available" && selectedListing.status !== "reserved") ||
-                selectedListing.sellerId === activeUserId
+                (selectedListingRecord.status !== "available" && selectedListingRecord.status !== "reserved") ||
+                selectedListingRecord.sellerId === activeUserId
               }
-              onClick={() => reserveListing(selectedListing.id)}
+              onClick={() => reserveListing(selectedListingRecord.id)}
             >
               <ShoppingBag size={18} />
-              {selectedListing.sellerId === activeUserId
+              {selectedListingRecord.sellerId === activeUserId
                 ? text.yourPost
-                : isRequestPost(selectedListing)
+                : isRequestPost(selectedListingRecord)
                   ? text.respondToRequest
                   : text.reserveItem}
             </button>
-            <button className="secondary sticky-cta" onClick={() => shareListing(selectedListing)}>
+            <button className="secondary sticky-cta" onClick={() => shareListing(selectedListingRecord)}>
               <Share2 size={18} />
               {text.share}
             </button>

@@ -235,6 +235,72 @@ describe("App user flows", () => {
     expect(cardTitles[0]).toBe("Mirrorless camera kit");
   });
 
+  it("renders browse item summaries and details in item position order", async () => {
+    mockCloudflareSession(null, {
+      ...seedState,
+      activeUserId: "",
+      listings: [
+        {
+          ...seedState.listings[0],
+          title: "Positioned bundle",
+          description: "Bundle with out-of-order storage rows.",
+          items: [
+            {
+              id: "positioned-item-3",
+              listingId: "listing-1",
+              name: "Third shelf",
+              price: 30,
+              condition: "good",
+              position: 2,
+              createdAt: "2026-05-23T10:00:00.000Z"
+            },
+            {
+              id: "positioned-item-1",
+              listingId: "listing-1",
+              name: "First shelf",
+              price: 10,
+              condition: "good",
+              position: 0,
+              createdAt: "2026-05-23T10:00:00.000Z"
+            },
+            {
+              id: "positioned-item-4",
+              listingId: "listing-1",
+              name: "Fourth shelf",
+              price: 40,
+              condition: "good",
+              position: 3,
+              createdAt: "2026-05-23T10:00:00.000Z"
+            },
+            {
+              id: "positioned-item-2",
+              listingId: "listing-1",
+              name: "Second shelf",
+              price: 20,
+              condition: "good",
+              position: 1,
+              createdAt: "2026-05-23T10:00:00.000Z"
+            }
+          ]
+        }
+      ],
+      reservations: [],
+      messages: [],
+      notifications: []
+    });
+    const { container } = render(<App />);
+
+    await screen.findAllByText("Cloudflare D1");
+
+    const cardItems = within(screen.getByRole("button", { name: /positioned bundle/i }))
+      .getAllByRole("listitem")
+      .map((node) => node.textContent);
+    expect(cardItems).toEqual(["First shelf", "Second shelf", "Third shelf"]);
+
+    const detailItems = Array.from(container.querySelectorAll(".detail-item strong")).map((node) => node.textContent);
+    expect(detailItems).toEqual(["First shelf", "Second shelf", "Third shelf", "Fourth shelf"]);
+  });
+
   it("toggles the responsive browse filters with an active filter count", () => {
     const { container } = render(<App />);
 

@@ -14,6 +14,13 @@ import {
   type User
 } from "../../src/data/types";
 import { ApiError } from "./http";
+import {
+  getListingImageRouteId,
+  getListingImageUrl,
+  getR2ImageRouteKey,
+  parseDataUrl,
+  type StoredListingImage
+} from "./images";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const TERMINAL_RESERVATION_STATUSES = new Set<ReservationStatus>(["paid", "sold", "cancelled"]);
@@ -68,7 +75,7 @@ type ListingImageRow = {
   id: string;
   listing_id: string;
   name: string;
-  data_url: string;
+  data_url?: string | null;
   r2_key?: string | null;
   is_primary: number;
   created_at: string;
@@ -161,7 +168,9 @@ type StateUser = {
 };
 
 export async function readState(db: D1Database, currentUser?: StateUser): Promise<AppState> {
-  await markExpiredReservationHolds(db);
+  if (currentUser) {
+    await markExpiredReservationHolds(db);
+  }
 
   const [users, listings, images, items] = await Promise.all([
     db
@@ -175,19 +184,31 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
       )
       .all<UserRow>(),
     db.prepare("SELECT * FROM listings ORDER BY created_at DESC").all<ListingRow>(),
-    db.prepare("SELECT * FROM listing_images ORDER BY created_at").all<ListingImageRow>(),
+    db
+      .prepare(
+        `SELECT id, listing_id, name, r2_key, is_primary, created_at
+         FROM listing_images
+         ORDER BY created_at`
+      )
+      .all<ListingImageRow>(),
     db.prepare("SELECT * FROM listing_items ORDER BY listing_id, position, created_at").all<ListingItemRow>()
   ]);
-  const reservations = currentUser
-    ? await db
-        .prepare(
-          `SELECT * FROM reservations
-           WHERE buyer_id = ? OR seller_id = ?
-           ORDER BY created_at DESC`
-        )
-        .bind(currentUser.id, currentUser.id)
-        .all<ReservationRow>()
-    : { results: [] as ReservationRow[] };
+  const [reservations, notifications] = currentUser
+    ? await Promise.all([
+        db
+          .prepare(
+            `SELECT * FROM reservations
+             WHERE buyer_id = ? OR seller_id = ?
+             ORDER BY created_at DESC`
+          )
+          .bind(currentUser.id, currentUser.id)
+          .all<ReservationRow>(),
+        db
+          .prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC")
+          .bind(currentUser.id)
+          .all<NotificationRow>()
+      ])
+    : [{ results: [] as ReservationRow[] }, { results: [] as NotificationRow[] }];
   const reservationIds = reservations.results.map((row) => row.id);
   const messages =
     reservationIds.length > 0
@@ -200,12 +221,6 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
           .bind(...reservationIds)
           .all<MessageRow>()
       : { results: [] as MessageRow[] };
-  const notifications = currentUser
-    ? await db
-        .prepare("SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC")
-        .bind(currentUser.id)
-        .all<NotificationRow>()
-    : { results: [] as NotificationRow[] };
 
   const imagesByListing = new Map<string, ListingImage[]>();
   for (const row of images.results) {
@@ -213,7 +228,7 @@ export async function readState(db: D1Database, currentUser?: StateUser): Promis
     listingImages.push({
       id: row.id,
       name: row.name,
-      dataUrl: row.data_url,
+      dataUrl: getListingImageUrl(row),
       primary: row.is_primary === 1,
       createdAt: row.created_at
     });
@@ -405,8 +420,13 @@ export async function updateListingInDb(env: Env, listingId: string, sellerId: s
   const items = normalizeDraftItems(draft, listingId, now);
   const listingPrice = getListingTotalPrice(items);
   const listingCondition = getListingSummaryCondition(items);
+  const existingImageRows = await db
+    .prepare("SELECT id, data_url, r2_key FROM listing_images WHERE listing_id = ?")
+    .bind(listingId)
+    .all<StoredListingImage>();
+  const existingImagesById = new Map(existingImageRows.results.map((row) => [row.id, row]));
   const images = await Promise.all(
-    draft.images.map((image, index) => persistListingImage(env, listingId, image, index === 0, now))
+    draft.images.map((image, index) => persistListingImage(env, listingId, image, index === 0, now, existingImagesById))
   );
   const result = await db
     .prepare(
@@ -1067,10 +1087,23 @@ async function persistListingImage(
   listingId: string,
   image: ListingImage,
   primary: boolean,
-  createdAt: string
+  createdAt: string,
+  existingImagesById?: Map<string, StoredListingImage>
 ): Promise<ListingImage & { r2Key?: string }> {
   const id = image.id || createId("image");
-  const parsed = parseBase64DataUrl(image.dataUrl);
+  const existingImage = getReusableExistingImage({ ...image, id }, existingImagesById);
+  if (existingImage?.data_url) {
+    return {
+      ...image,
+      id: existingImage.id,
+      dataUrl: existingImage.data_url,
+      primary,
+      createdAt,
+      r2Key: existingImage.r2_key ?? undefined
+    };
+  }
+
+  const parsed = parseDataUrl(image.dataUrl);
   if (!env.LISTING_IMAGES || !parsed) {
     return {
       ...image,
@@ -1097,18 +1130,33 @@ async function persistListingImage(
   };
 }
 
-function parseBase64DataUrl(dataUrl: string): { contentType: string; bytes: Uint8Array } | undefined {
-  const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-  if (!match) return undefined;
-  const binary = atob(match[2]);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
+function getReusableExistingImage(
+  image: ListingImage,
+  existingImagesById?: Map<string, StoredListingImage>
+): StoredListingImage | undefined {
+  if (!existingImagesById) return undefined;
+
+  const sameId = existingImagesById.get(image.id);
+  if (sameId && isExistingImageReference(image.dataUrl, sameId)) return sameId;
+
+  const listingImageId = getListingImageRouteId(image.dataUrl);
+  if (listingImageId) return existingImagesById.get(listingImageId);
+
+  const r2Key = getR2ImageRouteKey(image.dataUrl);
+  if (r2Key) {
+    return Array.from(existingImagesById.values()).find((existingImage) => existingImage.r2_key === r2Key);
   }
-  return {
-    contentType: match[1],
-    bytes
-  };
+
+  return undefined;
+}
+
+function isExistingImageReference(dataUrl: string, existingImage: StoredListingImage): boolean {
+  return (
+    dataUrl === existingImage.data_url ||
+    dataUrl === getListingImageUrl(existingImage) ||
+    getListingImageRouteId(dataUrl) === existingImage.id ||
+    (Boolean(existingImage.r2_key) && getR2ImageRouteKey(dataUrl) === existingImage.r2_key)
+  );
 }
 
 function sanitizeFilename(name: string): string {
