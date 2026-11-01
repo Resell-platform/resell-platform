@@ -44,6 +44,16 @@ function stubNarrowLayout(matches = true) {
   );
 }
 
+async function waitForCloudflareGuest() {
+  await screen.findByText(/log in or create account/i);
+  expect(screen.queryByText("Cloudflare D1")).not.toBeInTheDocument();
+}
+
+async function waitForCloudflareUser() {
+  await screen.findByText(/email verified/i);
+  expect(screen.queryByText("Cloudflare D1")).not.toBeInTheDocument();
+}
+
 describe("App user flows", () => {
   let webSocketMock: ReturnType<typeof installWebSocketMock>;
 
@@ -290,7 +300,7 @@ describe("App user flows", () => {
     });
     const { container } = render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareGuest();
 
     const cardItems = within(screen.getByRole("button", { name: /positioned bundle/i }))
       .getAllByRole("listitem")
@@ -484,6 +494,17 @@ describe("App user flows", () => {
     expect(screen.getByRole("heading", { name: /send feedback/i })).toBeInTheDocument();
   });
 
+  it("does not show the Cloudflare backend label in mobile settings", async () => {
+    stubNarrowLayout(true);
+    mockCloudflareSession(seedState.users[0], cloudflarePublicState(seedState.users[0]));
+    render(<App />);
+
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+
+    await waitForCloudflareUser();
+    expect(screen.queryByText("Local demo")).not.toBeInTheDocument();
+  });
+
   it("collapses and expands the desktop sidebar", () => {
     const { container } = render(<App />);
 
@@ -667,7 +688,7 @@ describe("App user flows", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: /pick up items from local sellers/i })).toBeInTheDocument();
-    expect(await screen.findAllByText("Cloudflare D1")).not.toHaveLength(0);
+    await waitForCloudflareGuest();
     expect(screen.getAllByRole("heading", { name: "Walnut writing desk" })).not.toHaveLength(0);
     expect(screen.queryByText(/log in to browse/i)).not.toBeInTheDocument();
   });
@@ -677,7 +698,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     expect(screen.getAllByText("Avery Chen")).not.toHaveLength(0);
     expect(screen.queryByLabelText(/display name/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/no phone badge/i)).not.toBeInTheDocument();
@@ -691,7 +712,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareGuest();
     fireEvent.click(screen.getByRole("button", { name: /contact seller/i }));
 
     expect(await screen.findAllByText(/log in with email to contact this seller/i)).not.toHaveLength(0);
@@ -706,7 +727,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareGuest();
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
 
     expect(await screen.findByRole("heading", { name: /log in to sell/i })).toBeInTheDocument();
@@ -719,7 +740,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareGuest();
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /chat/i }));
 
     expect(await screen.findByRole("heading", { name: /log in to chat/i })).toBeInTheDocument();
@@ -732,7 +753,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const deskRow = await screen.findByText("Walnut writing desk");
     fireEvent.click(within(deskRow.closest(".listing-management-row") as HTMLElement).getByRole("button", { name: /edit/i }));
@@ -765,7 +786,7 @@ describe("App user flows", () => {
 
     const { container } = render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     fillSellerSetup();
     fireEvent.change(screen.getByLabelText(/images/i), {
@@ -812,7 +833,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = (await screen.findByText("Mirrorless camera kit")).closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
@@ -838,7 +859,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     await waitFor(() => {
       expect(webSocketMock.instances).toHaveLength(1);
     });
@@ -883,7 +904,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     fireEvent.click(within(screen.getByLabelText(/primary navigation/i)).getByRole("button", { name: /^post$/i }));
     const cameraRow = (await screen.findByText("Mirrorless camera kit")).closest(".listing-management-row");
     expect(cameraRow).not.toBeNull();
@@ -910,7 +931,7 @@ describe("App user flows", () => {
 
     render(<App />);
 
-    await screen.findAllByText("Cloudflare D1");
+    await waitForCloudflareUser();
     fireEvent.click(screen.getAllByRole("button", { name: /export data/i })[0]);
 
     await waitFor(() => {
